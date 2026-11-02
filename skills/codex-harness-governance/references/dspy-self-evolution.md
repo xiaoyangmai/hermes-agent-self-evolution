@@ -54,6 +54,8 @@ Check five concrete connections in the evidence:
 
 Infrastructure, model access and context-drift errors invalidate an experiment; they must not masquerade as a bad prompt score. A correctly observed artifact defect is a real quality failure. Keep failed samples and any incomplete restoration visible. Resume the original receipt and deadline rather than rerunning anonymously until success.
 
+Check `invalid-search.json` before resuming after an evaluation failure: DSPy may have cached the exception as a zero. Preserve the invalid optimizer state. A failure on the initial evaluation, before any proposal, can restart search after quarantining that state and marker while reusing the original collected artifact. Later failures require a known valid checkpoint or a new, explicitly budgeted experiment. Follow the engine's recovery contract; never quietly accept the cached zero or erase prior valid search work.
+
 If only transport or result export code was repaired, the engine supports `--resume-engine-fix "audited reason"` while retaining previous/new engine hashes. All other frozen inputs must still match. Verify the diff did not change proposals, production behavior or grading; otherwise start a new experiment. This preserves valid observations without disguising changed experimental conditions.
 
 ## Decide without concealing regression

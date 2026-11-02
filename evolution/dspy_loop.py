@@ -128,6 +128,8 @@ def main():
     parser.add_argument("--resume-engine-fix", help="Audited reason for a transport/export-only engine repair; task, grader, data, models and policy must be unchanged")
     args = parser.parse_args()
     repo, output = args.repo.resolve(), args.output.resolve()
+    if (output / 'invalid-search.json').exists():
+        raise RuntimeError('Invalid search checkpoint: inspect invalid-search.json and quarantine the affected optimizer state before audited recovery. Retain execution receipts and frozen inputs.')
     if output.is_relative_to(repo) or args.dataset.resolve().is_relative_to(repo):
         parser.error("Keep evidence and held-out cases outside the producer's repository")
     if git(repo, "status", "--porcelain", "--untracked-files=no"):
@@ -234,6 +236,12 @@ def main():
         if decision["adopt"]:
             selected_body = candidate_body
     finally:
+        if runtime.failure is not None:
+            # DSPy can cache an evaluation exception as failure_score. Never
+            # silently resume that checkpoint as if it were a valid observation.
+            write_json(output / 'invalid-search.json', {'experiment_id': runtime.experiment_id,
+                       'error': str(runtime.failure), 'checkpoint': 'gepa',
+                       'status': 'invalid_evaluation_requires_audited_recovery'})
         # Git restore commit + normal HTTP release; no reset/force push or direct
         # edits to the installed profile. A failed trial cannot leave it selected.
         revision, state = runtime.deploy(selected_body)

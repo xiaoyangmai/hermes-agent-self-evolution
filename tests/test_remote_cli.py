@@ -2,6 +2,7 @@
 import json
 import sys
 from types import ModuleType
+from unittest.mock import Mock
 
 import dspy
 import pytest
@@ -10,8 +11,8 @@ from evolution import dspy_loop
 from evolution.hermes_runtime import digest, write_json
 
 
-@pytest.mark.parametrize('improves', [True, False])
-def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improves):
+@pytest.mark.parametrize('improves, interrupt_initial', [(True, False), (False, False), (True, True)])
+def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improves, interrupt_initial):
     repo, output = tmp_path / "repo", tmp_path / "evidence"
     repo.mkdir()
     module_path = repo / "project.py"
@@ -62,6 +63,21 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     argv = ["hermes-evolve", "--repo", str(repo), "--dataset", str(dataset), "--output", str(output),
             "--project-module", project.__name__, '--reflection-context', str(context)]
     monkeypatch.setattr(sys, "argv", argv)
+    if interrupt_initial:
+        original_grade = project.grade
+        monkeypatch.setattr(project, 'grade', Mock(side_effect=ConnectionError('model endpoint disconnected')))
+        with pytest.raises(RuntimeError, match='remote evidence is invalid'):
+            dspy_loop.main()
+        assert (output / 'invalid-search.json').is_file()
+        assert not (output / 'decision.json').exists()
+        assert deployments[-1] == Runtime.initial_body
+        with pytest.raises(RuntimeError, match='Invalid search checkpoint'):
+            dspy_loop.main()
+        # This fixture failed on its very first evaluation: no valid search
+        # history is discarded. Preserve the invalid checkpoint before retry.
+        (output / 'gepa').rename(output / 'gepa-invalid-initial')
+        (output / 'invalid-search.json').rename(output / 'invalid-search-archived.json')
+        monkeypatch.setattr(project, 'grade', original_grade)
     dspy_loop.main()
     decision = json.loads((output / "decision.json").read_text())
     assert decision['adopt'] is improves
