@@ -10,7 +10,8 @@ from evolution import dspy_loop
 from evolution.hermes_runtime import digest, write_json
 
 
-def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
+@pytest.mark.parametrize('improves', [True, False])
+def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improves):
     repo, output = tmp_path / "repo", tmp_path / "evidence"
     repo.mkdir()
     module_path = repo / "project.py"
@@ -23,6 +24,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
     project.decide = lambda comparison: {"adopt": comparison["candidate"][0]["score"] > comparison["baseline"][0]["score"]}
     monkeypatch.setitem(sys.modules, project.__name__, project)
     deployments = []
+    executions = []
 
     class Runtime:
         initial_body = "Produce an artifact."
@@ -33,6 +35,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
         def __deepcopy__(self, memo):
             return self
         def execute(self, instructions, task_input):
+            executions.append(json.loads(task_input)['id'])
             folder = self.output / "trials" / digest((instructions + task_input).encode())
             write_json(folder / "observation.json", {"score": float("verify evidence" in instructions), "feedback": "Verify evidence."})
             write_json(folder / "task.json", {"input": "Actual natural-language request for " + task_input})
@@ -46,7 +49,8 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
     prompts = []
     def propose(self, prompt):
         prompts.append(prompt)
-        return [{"text": "```\nProduce an artifact; verify evidence.\n```", "reasoning_content": "unused"}]
+        correction = 'verify evidence' if improves else 'check files'
+        return [{"text": f"```\nProduce an artifact; {correction}.\n```", "reasoning_content": "unused"}]
     monkeypatch.setattr(dspy.LM, "__call__", propose)
     for name, value in {"EVOLUTION_API_BASE": "https://invalid.example/v1", "EVOLUTION_API_KEY": "unused",
                         "EVOLUTION_MODEL": "openai/test", "EVOLUTION_JUDGE_MODEL": "openai/test"}.items():
@@ -59,10 +63,17 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
             "--project-module", project.__name__, '--reflection-context', str(context)]
     monkeypatch.setattr(sys, "argv", argv)
     dspy_loop.main()
-    assert json.loads((output / "decision.json").read_text())["adopt"]
+    decision = json.loads((output / "decision.json").read_text())
+    assert decision['adopt'] is improves
+    assert decision['changed'] is improves
+    assert ('test' in executions) is improves
     search = json.loads((output / "search.json").read_text())
-    assert "verify evidence" in search["candidates"][search["best_idx"]]["produce"]
-    assert "verify evidence" in deployments[-1]
+    assert ('verify evidence' in search['candidates'][search['best_idx']]['produce']) is improves
+    assert ('verify evidence' in deployments[-1]) is improves
+    if not improves:
+        assert decision['held_out'] == 'not_run_no_changed_candidate'
+        assert json.loads((output / 'comparison.json').read_text()) == {'baseline': [], 'candidate': []}
+        assert deployments[-1] == Runtime.initial_body
     assert (output / "program.json").is_file()
     assert prompts and "actual_task_request" in prompts[0]
     assert "Actual natural-language request" in prompts[0]

@@ -210,20 +210,25 @@ def main():
         candidate_body = compiled.produce.signature.instructions
         (output / "candidate_skill.md").write_text(candidate_body, encoding="utf-8")
         comparison = {"baseline": [], "candidate": []}
-        # Held-out results never enter GEPA or trigger another edit in this run.
-        for index, example in enumerate(examples["test"]):
-            versions = [("baseline", program), ("candidate", compiled)]
-            if index % 2:
-                versions.reverse()
-            for label, item in versions:
-                pred = item(**example.inputs())
-                metric(example, pred)
-                folder = Path(json.loads(pred.output)["trial"])
-                grade = json.loads((folder / "grade.json").read_text(encoding="utf-8"))
-                comparison[label].append({"case_id": json.loads(example.task_input)["id"], "trial": str(folder), **grade})
-        decision = project.decide(comparison)
-        decision["changed"] = candidate_body.strip() != baseline_body.strip()
-        decision["adopt"] = decision["adopt"] and decision["changed"]
+        changed = candidate_body.strip() != baseline_body.strip()
+        if changed:
+            # Held-out results never enter GEPA or trigger another edit in this run.
+            for index, example in enumerate(examples["test"]):
+                versions = [("baseline", program), ("candidate", compiled)]
+                if index % 2:
+                    versions.reverse()
+                for label, item in versions:
+                    pred = item(**example.inputs())
+                    metric(example, pred)
+                    folder = Path(json.loads(pred.output)["trial"])
+                    grade = json.loads((folder / "grade.json").read_text(encoding="utf-8"))
+                    comparison[label].append({"case_id": json.loads(example.task_input)["id"], "trial": str(folder), **grade})
+            decision = {**project.decide(comparison), "changed": True}
+        else:
+            # An identical winner cannot improve the baseline. Preserve the
+            # reserved cases instead of paying for a baseline-versus-itself run.
+            decision = {"adopt": False, "changed": False, "reason": "search_retained_baseline",
+                        "held_out": "not_run_no_changed_candidate"}
         write_json(output / "comparison.json", comparison)
         write_json(output / "decision.json", decision)
         if decision["adopt"]:

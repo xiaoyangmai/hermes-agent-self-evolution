@@ -60,6 +60,8 @@ If only transport or result export code was repaired, the engine supports `--res
 
 Validation selection is not adoption. Evaluate the frozen winner and baseline on the reserved comparison; counterbalance order where practical. Require required artifacts and semantic gates, then check per-case dimensions and meaningful gain. A higher average must not hide a regression in an already-working capability. The demo's exact thresholds belong to its adapter, not this Skill.
 
+When validation retains the unchanged baseline, the engine records `search_retained_baseline`, leaves the held-out comparison empty, and restores/verifies that baseline. No new version exists to justify expensive comparison runs. Report this as no selected improvement, not as passing a held-out evaluation; preserve those unexecuted cases for a later experiment.
+
 Report completed run count, delivered artifacts, per-case paired scores, grader disagreement, hard failures, time/usage evidence and final applied revision. Separate search evaluations from unique executions and held-out replicas. Small same-family model comparisons support a local proxy decision, not external ground truth, stable population-level improvement or demonstrated learning by children.
 
 On rejection, restore the declared baseline through Git and the ordinary release path and verify installed state. If the service is unavailable or a run is still active, report restoration pending; a `finally` block alone does not prove recovery. If budgets end without improvement, retain that result. Another experiment needs a justified hypothesis and fresh held-out evidence when previous outcomes informed the edit.

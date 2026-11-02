@@ -78,7 +78,7 @@ The finite loop performs:
 3. Commit/push → project sync → environment check/controlled prepare → idle-profile check → one refresh → installed hash verification.
 4. Submit a fresh remote task, poll the original run/deadline, collect durable tool history and verify Skill loading. Check runtime context again at termination.
 5. Finalize the explicit delivery id, fetch result and manifest, download bytes, verify artifact id and SHA-256, and evaluate independently.
-6. Save the compiled DSPy program, select by validation, then run a counterbalanced baseline/candidate held-out comparison.
+6. Save the compiled DSPy program and select by validation. If the selected Skill is unchanged, record `search_retained_baseline` without consuming held-out cases. Otherwise run the counterbalanced baseline/candidate held-out comparison.
 7. Apply the project's frozen adoption gate. Restore baseline on rejection/error using a normal commit and HTTP release; verify effective installed state. No force push, hidden runtime patch or human grading.
 
 GEPA's metric-call budget counts evaluations, including cached observations. `max_remote_runs` separately caps actual task submissions. Each task has a fixed elapsed-time budget. A stop request is not terminal evidence; an unresolved active task blocks refresh and must be recovered before continuing.
