@@ -81,6 +81,7 @@ def main():
     parser.add_argument("--dataset", type=Path, required=True, help="Private train/validation/test JSON, outside the deployed repository")
     parser.add_argument("--output", type=Path, required=True, help="Reuse to resume the same frozen experiment")
     parser.add_argument("--max-metric-calls", type=int)
+    parser.add_argument("--resume-engine-fix", help="Audited reason for a transport/export-only engine repair; task, grader, data, models and policy must be unchanged")
     args = parser.parse_args()
     repo, output = args.repo.resolve(), args.output.resolve()
     if output.is_relative_to(repo) or args.dataset.resolve().is_relative_to(repo):
@@ -106,7 +107,13 @@ def main():
     manifest = output / "experiment.json"
     if manifest.exists():
         saved = json.loads(manifest.read_text(encoding="utf-8"))
-        if saved["contract"] != frozen:
+        changed = {k for k in frozen if saved["contract"].get(k) != frozen[k]}
+        if changed == {"engine_sha256"} and args.resume_engine_fix:
+            saved.setdefault("engine_repairs", []).append({"previous_sha256": saved["contract"]["engine_sha256"],
+                "applied_sha256": frozen["engine_sha256"], "reason": args.resume_engine_fix})
+            saved["contract"] = frozen
+            write_json(manifest, saved)
+        elif changed:
             raise RuntimeError("Experiment inputs changed; start a new evidence directory")
         baseline_body = saved["baseline_body"]
         runtime.experiment_id = saved["experiment_id"]
@@ -138,7 +145,16 @@ def main():
         if runtime.failure:
             raise RuntimeError("Search aborted: remote evidence is invalid") from runtime.failure
         compiled.save(str(output / "program.json"))
-        write_json(output / "search.json", compiled.detailed_results.to_dict())
+        # DSPy 3.2.1's to_dict() calls .items() on Module candidates. Export the
+        # real predictor instructions explicitly; do not pickle a live runtime.
+        details = compiled.detailed_results
+        write_json(output / "search.json", {
+            "candidates": [{name: pred.signature.instructions for name, pred in candidate.named_predictors()}
+                           for candidate in details.candidates],
+            **{key: getattr(details, key) for key in ("parents", "val_aggregate_scores", "val_subscores",
+                "discovery_eval_counts", "total_metric_calls", "num_full_val_evals", "best_idx", "seed")},
+            "per_val_instance_best_candidates": {str(case): sorted(items)
+                                                  for case, items in details.per_val_instance_best_candidates.items()}})
         candidate_body = compiled.produce.signature.instructions
         (output / "candidate_skill.md").write_text(candidate_body, encoding="utf-8")
         comparison = {"baseline": [], "candidate": []}

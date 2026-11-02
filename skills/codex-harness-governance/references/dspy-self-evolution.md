@@ -50,6 +50,8 @@ Check five concrete connections in the evidence:
 
 Infrastructure, model access and context-drift errors invalidate an experiment; they must not masquerade as a bad prompt score. A correctly observed artifact defect is a real quality failure. Keep failed samples and any incomplete restoration visible. Resume the original receipt and deadline rather than rerunning anonymously until success.
 
+If only transport or result export code was repaired, the engine supports `--resume-engine-fix "audited reason"` while retaining previous/new engine hashes. All other frozen inputs must still match. Verify the diff did not change proposals, production behavior or grading; otherwise start a new experiment. This preserves valid observations without disguising changed experimental conditions.
+
 ## Decide without concealing regression
 
 Validation selection is not adoption. Evaluate the frozen winner and baseline on the reserved comparison; counterbalance order where practical. Require required artifacts and semantic gates, then check per-case dimensions and meaningful gain. A higher average must not hide a regression in an already-working capability. The demo's exact thresholds belong to its adapter, not this Skill.
