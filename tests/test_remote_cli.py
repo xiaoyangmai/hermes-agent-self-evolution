@@ -71,6 +71,12 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
     repaired = json.loads((output / "experiment.json").read_text())
     assert repaired["engine_repairs"][0]["previous_sha256"] == "previous-export-only-version"
     assert repaired["experiment_id"] == manifest["experiment_id"]
+    def unavailable(self, instructions):
+        raise RuntimeError("release unavailable")
+    monkeypatch.setattr(Runtime, "deploy", unavailable)
+    with pytest.raises(RuntimeError, match="release unavailable"):
+        dspy_loop.main()
+    assert json.loads((output / "selected-release.json").read_text())["status"] == "pending"
     repaired["contract"]["dataset_sha256"] = "different-cases"
     write_json(output / "experiment.json", repaired)
     with pytest.raises(RuntimeError, match="Experiment inputs changed"):

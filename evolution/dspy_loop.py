@@ -140,6 +140,7 @@ def main():
                           skip_perfect_score=False, use_merge=True, log_dir=str(output / "gepa"),
                           gepa_kwargs={"stop_callbacks": lambda state: runtime.failure is not None})
     selected_body = baseline_body
+    write_json(output / "selected-release.json", {"status": "pending", "experiment_id": runtime.experiment_id})
     try:
         compiled = optimizer.compile(program, trainset=examples["train"], valset=examples["validation"])
         if runtime.failure:
@@ -180,7 +181,8 @@ def main():
         # Git restore commit + normal HTTP release; no reset/force push or direct
         # edits to the installed profile. A failed trial cannot leave it selected.
         revision, state = runtime.deploy(selected_body)
-        write_json(output / "selected-release.json", {"revision": revision, "state": state})
+        write_json(output / "selected-release.json", {"status": "applied", "experiment_id": runtime.experiment_id,
+                                                      "revision": revision, "state": state})
     print(json.dumps({"output": str(output), "decision": decision}, ensure_ascii=False))
 
 
