@@ -27,6 +27,8 @@ cd hermes-agent-self-evolution
 pip install -e '.[dev,browser]'
 ```
 
+Run the command in the environment where it was installed. With a Windows `.venv`, use `.venv\Scripts\hermes-evolve.exe` (or activate that environment first); installation into a virtual environment does not add it to the global PATH.
+
 Dependencies pin DSPy 3.2.1 and GEPA 0.0.27. The [demo project](https://github.com/xiaoyangmai/demo-team) uses Playwright with an installed Edge browser. Another project may use different artifact checks without installing browser dependencies. `LITELLM_LOCAL_MODEL_COST_MAP=True` is set before DSPy import so startup does not depend on downloading a cost map; no cost estimate is asserted from that map.
 
 Set these environment variables using your credential manager or local session, never a committed file:

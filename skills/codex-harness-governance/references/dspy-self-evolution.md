@@ -38,6 +38,8 @@ Bind reflection to the fixed Skill identity and the actual runtime request, not 
 
 Use the installed `hermes-evolve --repo ... --dataset ... --output ...` entrypoint; credentials come from environment variables documented by the engine, never from this Skill. Obtain profile Gateway keys through the control API; model API credentials are separate.
 
+Resolve the engine's Python environment before invoking it; a virtual-environment installation is not necessarily on PATH. Use its `bin/hermes-evolve` or Windows `Scripts/hermes-evolve.exe`, or activate the environment. Verify the configured model endpoint is reachable separately from the Hermes task API.
+
 The engine owns commit/push, sync, environment check/prepare, refresh, installed hash verification, actual task submission, terminal observation, trace collection, finalize and downloads. See [control-plane contracts](hermes-control-plane.md) for the transport. Do not additionally invoke a manual release/round loop around each engine call.
 
 Check five concrete connections in the evidence:
