@@ -17,7 +17,7 @@ Ordinary product coding and isolated Skill editing do not automatically trigger 
 
 ## Working method
 
-1. Read the project's actual rules, source, runtime version and prior evidence. Define the intended useful result, task inputs, role, allowed tools, artifacts and automatic acceptance criteria.
+1. Read the project's actual rules, source, runtime version and prior evidence. Define the intended useful result, task inputs, role, allowed tools, artifacts and automatic acceptance criteria. Preserve the promised medium and user journey; a cheaper surrogate needs explicit agreement and a new baseline.
 2. Choose the simplest sufficient execution structure. Read [architecture](references/agent-architecture.md) when deciding between a fixed workflow, one agent or multiple roles. Do not add agents or a daemon merely to enact a policy.
 3. Give each fact one owner: durable project context in repository instructions, reusable behavior in Skills, hard tool/runtime boundaries in native configuration, search in the optimizer, business graders in the project, deployment/transport in the control-plane. Link rather than duplicate.
 4. Freeze the baseline and evidence needed before evaluating a change. Use [profile development](references/profile-development.md) to diagnose mechanisms, and [evaluation](references/evals-and-feedback.md) for calibration, regression gates and uncertainty.

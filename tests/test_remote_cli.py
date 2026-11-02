@@ -53,8 +53,10 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
     dataset = tmp_path / "cases.json"
     write_json(dataset, {split: [{"id": split}] for split in ("train", "validation", "test")})
+    context = tmp_path / 'reflection.md'
+    context.write_text('Observed missing evidence; test a verify-before-edit procedure.')
     argv = ["hermes-evolve", "--repo", str(repo), "--dataset", str(dataset), "--output", str(output),
-            "--project-module", project.__name__]
+            "--project-module", project.__name__, '--reflection-context', str(context)]
     monkeypatch.setattr(sys, "argv", argv)
     dspy_loop.main()
     assert json.loads((output / "decision.json").read_text())["adopt"]
@@ -66,6 +68,8 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
     assert "Actual natural-language request" in prompts[0]
     assert "reusable-artifact" in prompts[0]
     assert "not the literal message" in prompts[0]
+    assert context.read_text() in prompts[0]
+    assert (output / 'reflection-context.md').read_text() == context.read_text()
     assert json.loads((output / "selected-release.json").read_text())["revision"] == "selected-sha"
 
     manifest = json.loads((output / "experiment.json").read_text())
@@ -76,6 +80,11 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
     repaired = json.loads((output / "experiment.json").read_text())
     assert repaired["engine_repairs"][0]["previous_sha256"] == "previous-export-only-version"
     assert repaired["experiment_id"] == manifest["experiment_id"]
+    original_context = context.read_text()
+    context.write_text('A different hypothesis must start a new experiment.')
+    with pytest.raises(RuntimeError, match='Experiment inputs changed'):
+        dspy_loop.main()
+    context.write_text(original_context)
     def unavailable(self, instructions):
         raise RuntimeError("release unavailable")
     monkeypatch.setattr(Runtime, "deploy", unavailable)

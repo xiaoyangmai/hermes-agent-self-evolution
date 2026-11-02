@@ -64,6 +64,8 @@ Ask the producer to check the few decisions most likely to fail before packaging
 
 Use a short, explicit repair allowance appropriate to the task. Do not instruct the agent to keep revising until it believes its score is high enough. Preserve the normal terminal failure or limitation report when the budget is exhausted. A producer self-check can prevent defects; it is not an independent acceptance score and does not replace external artifact inspection.
 
+When repeated low-level output assembly consumes effort or introduces regressions, consider one maintained project/Skill template or script for that repeated work, leaving the agent to author the meaningful variable content. Verify the template's actual user flow. This is appropriate for repeated delivery, not a reason to extract one-off helpers or build another runtime. Freeze the template during a Skill-body experiment so its benefits are not misattributed to prompt search.
+
 ## Develop, freeze, then evaluate
 
 Use small development cases to inspect whether the intended mechanism appears in the deployed trace and artifacts. Examine regressions and cost as well as the target score. If the new procedure is not being followed, diagnose loading or clarity before making the process longer. Bound the number of development revisions before starting; an unpromising candidate can be abandoned.

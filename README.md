@@ -61,6 +61,8 @@ Keep private cases and outputs outside the deployed Git repository. Dataset JSON
 
 Reflection receives the fixed Skill identity, actual natural-language Gateway request, artifact grades and execution evidence. Internal DSPy case JSON is explicitly distinguished from the runtime input. The proposer compares up to three training cases and requests the smallest reusable procedural change, keeping topic-specific advice conditional. This prevents a sampled topic from silently redefining the Skill's purpose; held-out regression gates still decide whether it worked. The custom `instruction_proposer` uses GEPA's renderer/extractor because DSPy 3.2.1's adapter does not forward GEPA's native reflection-template option. Optimizer settings and Skill identity are frozen with the experiment.
 
+An optional `--reflection-context /private/hypothesis.md` connects reviewed prior evidence and external research to the proposal. The file is hashed with the experiment and copied into its evidence directory; it is not supplied to the grader. Changed context requires a new experiment. This is a bounded design input, not autonomous browsing or another optimization scheduler.
+
 ```bash
 hermes-evolve --repo /path/to/demo-team \
   --dataset /private/experiment/cases.json \

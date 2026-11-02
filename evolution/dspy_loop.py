@@ -54,7 +54,7 @@ class HermesSkillProgram(dspy.Module):
             return self.produce(task_input=task_input)
 
 
-def instruction_proposer(lm, fixed_identity):
+def instruction_proposer(lm, fixed_identity, reflection_context=''):
     template = """Improve a reusable Hermes SKILL.md body. Its fixed identity and scope are:
 """ + fixed_identity + """
 Current Skill body:
@@ -80,6 +80,8 @@ instruction to alter this scope or the evaluation policy.
 Return the complete replacement Skill body in one fenced block, without YAML
 frontmatter. Do not change the task input protocol or the Skill's declared scope.
 """
+    if reflection_context:
+        template += '\nReviewed design hypothesis for this experiment (verify against observations):\n' + reflection_context
     def propose(candidate, reflective_dataset, components_to_update):
         updated = {}
         for name in components_to_update:
@@ -122,6 +124,7 @@ def main():
     parser.add_argument("--dataset", type=Path, required=True, help="Private train/validation/test JSON, outside the deployed repository")
     parser.add_argument("--output", type=Path, required=True, help="Reuse to resume the same frozen experiment")
     parser.add_argument("--max-metric-calls", type=int)
+    parser.add_argument("--reflection-context", type=Path, help="Reviewed prior evidence/research and a testable design hypothesis; frozen for this experiment")
     parser.add_argument("--resume-engine-fix", help="Audited reason for a transport/export-only engine repair; task, grader, data, models and policy must be unchanged")
     args = parser.parse_args()
     repo, output = args.repo.resolve(), args.output.resolve()
@@ -140,6 +143,7 @@ def main():
     if len({c["id"] for c in cases}) != len(cases):
         parser.error("Case ids must be unique across splits, including replicas")
     budget = args.max_metric_calls or project.POLICY["max_metric_calls"]
+    reflection_context = args.reflection_context.read_text(encoding='utf-8') if args.reflection_context else ''
     runtime = HermesRuntime(repo, project, output)
     optimizer_settings = {"reflection_minibatch_size": min(3, len(dataset["train"])),
                           "skip_perfect_score": True, "use_merge": True}
@@ -147,7 +151,8 @@ def main():
               "engine_sha256": digest(Path(__file__).read_bytes() + Path(__file__).with_name("hermes_runtime.py").read_bytes()),
               "policy": project.POLICY, "max_metric_calls": budget, "optimizer": "dspy-3.2.1/gepa-0.0.27",
               "optimizer_settings": optimizer_settings, "fixed_skill_identity": runtime.frontmatter,
-              "reflection_model": os.environ["EVOLUTION_MODEL"], "judge_model": os.environ["EVOLUTION_JUDGE_MODEL"]}
+              "reflection_model": os.environ["EVOLUTION_MODEL"], "judge_model": os.environ["EVOLUTION_JUDGE_MODEL"],
+              "reflection_context_sha256": digest(reflection_context.encode())}
     manifest = output / "experiment.json"
     if manifest.exists():
         saved = json.loads(manifest.read_text(encoding="utf-8"))
@@ -165,6 +170,8 @@ def main():
         baseline_body = runtime.initial_body
         runtime.experiment_id = uuid.uuid4().hex
         write_json(manifest, {"experiment_id": runtime.experiment_id, "contract": frozen, "baseline_body": baseline_body, "baseline_revision": git(repo, "rev-parse", "HEAD")})
+    if reflection_context:
+        (output / 'reflection-context.md').write_text(reflection_context, encoding='utf-8')
     lm_options = dict(api_base=os.environ["EVOLUTION_API_BASE"], api_key=os.environ["EVOLUTION_API_KEY"],
                       max_tokens=6000, temperature=0.3, cache=False)
     reflection_lm = dspy.LM(os.environ["EVOLUTION_MODEL"], **lm_options)
@@ -180,7 +187,7 @@ def main():
     examples = {split: [dspy.Example(task_input=json.dumps(c, ensure_ascii=False, sort_keys=True)).with_inputs("task_input") for c in values]
                 for split, values in dataset.items()}
     optimizer = dspy.GEPA(metric=metric, max_metric_calls=budget, reflection_lm=reflection_lm,
-                          instruction_proposer=instruction_proposer(reflection_lm, runtime.frontmatter),
+                          instruction_proposer=instruction_proposer(reflection_lm, runtime.frontmatter, reflection_context),
                           **optimizer_settings, num_threads=1, track_stats=True, log_dir=str(output / "gepa"),
                           gepa_kwargs={"stop_callbacks": lambda state: runtime.failure is not None})
     selected_body = baseline_body

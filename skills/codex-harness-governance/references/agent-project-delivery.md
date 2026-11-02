@@ -40,6 +40,8 @@ Define the smallest useful contract before editing:
 
 Prefer a narrow role contract over a broad personality prompt. Keep durable project facts, repeatable procedures, runtime settings, and evaluation evidence in their respective owners.
 
+For a commercial or user-facing deliverable, review the actual product at contract definition and final acceptance. When available, use `product-review` for this specialized judgment rather than duplicating its standards here. Keep three claims separate: improvement relative to baseline, meeting an absolute useful-product floor, and evidence of real use/payment. Automatic proxies can establish the first two within their coverage; they cannot invent market demand or user outcomes. Keep required modality and end-to-end flow in the contract: illustrated stories need pictures; a completed lesson needs its closing experience. Do not silently substitute an easier benchmark.
+
 When authoring or improving profile behavior, use [profile-development.md](profile-development.md) to turn observed failures into a focused procedure and useful examples. Use [evals-and-feedback.md](evals-and-feedback.md) to separate development from adoption evidence and define the bounded search and decision policy.
 
 ## Remote environment readiness

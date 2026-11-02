@@ -28,7 +28,7 @@ Bind reflection to the fixed Skill identity and the actual runtime request, not 
 ## Prepare the experiment
 
 1. Read current engine README, project adapter and applicable repository instructions. Verify installed DSPy/GEPA versions and actual Gateway capabilities. The validated pins are DSPy 3.2.1 and GEPA 0.0.27; upgrades need integration verification.
-2. State the useful output and observable failure mechanism. Choose the optimizable file and freeze other behavior inputs. The demo targets a real offline children's learning page, not a simulated answer or an illustrated-comic quality claim.
+2. State the useful output and observable failure mechanism. Choose the optimizable file and freeze other behavior inputs. The current demo targets a four-page illustrated children's comic with two interactive questions and a practical ending. Earlier learning-page experiments remain different contracts; their scores are not comparable.
 3. Define the project task, result/manifest, fixed environment scripts, trace-loading check, artifact checker, independent model rubric and adoption rule in its adapter. Do not copy the demo's educational rubric to unrelated products.
 4. Keep private cases and evidence outside the producer repository. Train feeds proposals, validation selects candidates, held-out cases decide adoption once. Give replicas different ids; repeated evaluation of the same candidate/case is a cached observation, not a new replicate.
 5. Freeze cases, policy, code, models, budgets and baseline before production. Calibrate semantic boundaries automatically using positive/negative controls. No human grading fallback; a failed or uncertain gate prevents adoption.
@@ -65,6 +65,8 @@ Report completed run count, delivered artifacts, per-case paired scores, grader 
 On rejection, restore the declared baseline through Git and the ordinary release path and verify installed state. If the service is unavailable or a run is still active, report restoration pending; a `finally` block alone does not prove recovery. If budgets end without improvement, retain that result. Another experiment needs a justified hypothesis and fresh held-out evidence when previous outcomes informed the edit.
 
 Codex still performs the higher-level reflection in [profile development](profile-development.md): inspect mechanism, research methods/tools when appropriate, choose the correct owner, and test a prediction. It does not hand-edit the optimized Skill midway through a running GEPA experiment.
+
+Pass a concise reviewed hypothesis and relevant research/previous failures through `--reflection-context <file>` when continuing a bounded project iteration. The engine hashes and retains this input; changing it requires a new experiment. It informs GEPA's proposal, not the independent grader. Keep current held-out outcomes out of it until that experiment ends, then relabel exposed cases as development/regression. This connects outer diagnosis to the existing optimizer without adding a second scheduler. If three iterations are authorized, finish three bounded experiments or report a demonstrated blocker; do not count three executions of one unchanged prompt as three iterations.
 
 ## Progressive loading and maintenance
 
