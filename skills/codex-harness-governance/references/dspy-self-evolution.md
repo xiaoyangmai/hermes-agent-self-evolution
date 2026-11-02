@@ -23,6 +23,8 @@ Do not optimize an unused prompt while exporting an unchanged `skill_text` membe
 
 The current remote CLI optimizes one Skill body per experiment. It does not search SOUL, tools, dependencies, four roles or model settings simultaneously. If failure evidence points to one of those owners, Codex researches and changes that asset separately, verifies it, then creates a new comparable experiment. GEPA's reflection model has no automatic web/tool research capability in this adapter; do not claim it has one.
 
+Bind reflection to the fixed Skill identity and the actual runtime request, not merely serialized optimizer inputs. Use contrasting training cases and keep domain rules conditional. The adapter supplies these facts through a custom GEPA instruction proposer; it requests a small procedural correction rather than a longer prompt. Inspect the installed DSPy adapter before assuming a native GEPA template option reaches the proposer. A scope diagnostic can check this mechanism, but only fresh remote artifacts can establish its quality effect.
+
 ## Prepare the experiment
 
 1. Read current engine README, project adapter and applicable repository instructions. Verify installed DSPy/GEPA versions and actual Gateway capabilities. The validated pins are DSPy 3.2.1 and GEPA 0.0.27; upgrades need integration verification.

@@ -57,6 +57,8 @@ A project module, by default `harness.dspy_project`, exports:
 
 Keep private cases and outputs outside the deployed Git repository. Dataset JSON contains exactly `train`, `validation`, `test`, each a nonempty list of cases with globally unique `id`; case-specific fields belong to the project. Different replica ids mean separate real runs. Train and validation feed search; test results never feed another candidate in that experiment.
 
+Reflection receives the fixed Skill identity, actual natural-language Gateway request, artifact grades and execution evidence. Internal DSPy case JSON is explicitly distinguished from the runtime input. The proposer compares up to three training cases and requests the smallest reusable procedural change, keeping topic-specific advice conditional. This prevents a sampled topic from silently redefining the Skill's purpose; held-out regression gates still decide whether it worked. The custom `instruction_proposer` uses GEPA's renderer/extractor because DSPy 3.2.1's adapter does not forward GEPA's native reflection-template option. Optimizer settings and Skill identity are frozen with the experiment.
+
 ```bash
 hermes-evolve --repo /path/to/demo-team \
   --dataset /private/experiment/cases.json \

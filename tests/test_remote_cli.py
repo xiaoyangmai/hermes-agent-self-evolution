@@ -26,6 +26,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
 
     class Runtime:
         initial_body = "Produce an artifact."
+        frontmatter = "name: reusable-artifact\ndescription: Produce artifacts for varying tasks."
         failure = None
         def __init__(self, repo, project, output):
             self.output = output
@@ -34,6 +35,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
         def execute(self, instructions, task_input):
             folder = self.output / "trials" / digest((instructions + task_input).encode())
             write_json(folder / "observation.json", {"score": float("verify evidence" in instructions), "feedback": "Verify evidence."})
+            write_json(folder / "task.json", {"input": "Actual natural-language request for " + task_input})
             return json.dumps({"trial": str(folder), "trace": {"tools": ["actual-test-executor"]}})
         def deploy(self, instructions):
             deployments.append(instructions)
@@ -41,12 +43,11 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dspy_loop, "HermesRuntime", Runtime)
     monkeypatch.setattr(dspy_loop, "git", lambda repo, *args: "" if args[0] == "status" else "baseline-sha")
-    gepa = dspy.GEPA
-    def optimizer(**kwargs):
-        kwargs.pop("reflection_lm")
-        return gepa(**kwargs, instruction_proposer=lambda candidate, reflective_dataset, components_to_update:
-                    {name: "Produce an artifact; verify evidence." for name in components_to_update})
-    monkeypatch.setattr(dspy, "GEPA", optimizer)
+    prompts = []
+    def propose(self, prompt):
+        prompts.append(prompt)
+        return [{"text": "```\nProduce an artifact; verify evidence.\n```", "reasoning_content": "unused"}]
+    monkeypatch.setattr(dspy.LM, "__call__", propose)
     for name, value in {"EVOLUTION_API_BASE": "https://invalid.example/v1", "EVOLUTION_API_KEY": "unused",
                         "EVOLUTION_MODEL": "openai/test", "EVOLUTION_JUDGE_MODEL": "openai/test"}.items():
         monkeypatch.setenv(name, value)
@@ -61,6 +62,10 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch):
     assert "verify evidence" in search["candidates"][search["best_idx"]]["produce"]
     assert "verify evidence" in deployments[-1]
     assert (output / "program.json").is_file()
+    assert prompts and "actual_task_request" in prompts[0]
+    assert "Actual natural-language request" in prompts[0]
+    assert "reusable-artifact" in prompts[0]
+    assert "not the literal message" in prompts[0]
     assert json.loads((output / "selected-release.json").read_text())["revision"] == "selected-sha"
 
     manifest = json.loads((output / "experiment.json").read_text())
