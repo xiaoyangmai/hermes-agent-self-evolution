@@ -11,8 +11,8 @@ from evolution import dspy_loop
 from evolution.hermes_runtime import digest, write_json
 
 
-@pytest.mark.parametrize('improves, interrupt_initial', [(True, False), (False, False), (True, True)])
-def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improves, interrupt_initial):
+@pytest.mark.parametrize('improves, interrupted_case', [(True, None), (False, None), (True, 'validation'), (True, 'train')])
+def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improves, interrupted_case):
     repo, output = tmp_path / "repo", tmp_path / "evidence"
     repo.mkdir()
     module_path = repo / "project.py"
@@ -63,9 +63,13 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     argv = ["hermes-evolve", "--repo", str(repo), "--dataset", str(dataset), "--output", str(output),
             "--project-module", project.__name__, '--reflection-context', str(context)]
     monkeypatch.setattr(sys, "argv", argv)
-    if interrupt_initial:
+    if interrupted_case:
         original_grade = project.grade
-        monkeypatch.setattr(project, 'grade', Mock(side_effect=ConnectionError('model endpoint disconnected')))
+        def interrupted_grade(folder, case, lm):
+            if case['id'] == interrupted_case:
+                raise ConnectionError('model endpoint disconnected')
+            return original_grade(folder, case, lm)
+        monkeypatch.setattr(project, 'grade', interrupted_grade)
         with pytest.raises(RuntimeError, match='remote evidence is invalid'):
             dspy_loop.main()
         assert (output / 'invalid-search.json').is_file()
@@ -73,12 +77,19 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
         assert deployments[-1] == Runtime.initial_body
         with pytest.raises(RuntimeError, match='Invalid search checkpoint'):
             dspy_loop.main()
-        # This fixture failed on its very first evaluation: no valid search
-        # history is discarded. Preserve the invalid checkpoint before retry.
+        assert not prompts  # No proposed candidate or selection history to lose.
+        preserved_grades = {p: p.read_bytes() for p in (output / 'trials').glob('*/grade.json')}
+        assert bool(preserved_grades) is (interrupted_case == 'train')
+        # Replay the same cached valid observations before the first proposal;
+        # retain both the invalid checkpoint and the original trial ledger.
         (output / 'gepa').rename(output / 'gepa-invalid-initial')
         (output / 'invalid-search.json').rename(output / 'invalid-search-archived.json')
-        monkeypatch.setattr(project, 'grade', original_grade)
+        recovered_grade = Mock(wraps=original_grade)
+        monkeypatch.setattr(project, 'grade', recovered_grade)
     dspy_loop.main()
+    if interrupted_case:
+        assert all(p.read_bytes() == content for p, content in preserved_grades.items())
+        assert all(call.args[0] / 'grade.json' not in preserved_grades for call in recovered_grade.call_args_list)
     decision = json.loads((output / "decision.json").read_text())
     assert decision['adopt'] is improves
     assert decision['changed'] is improves
