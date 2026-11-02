@@ -17,7 +17,7 @@ Do not remove environment/check/prepare or finalize/result/artifacts/download me
 
 ## What DSPy actually changes
 
-The selected native Skill body is the `dspy.Predict` signature instructions. The remote adapter writes those exact instructions into the repository Skill, preserving frontmatter; commits/pushes; publishes; and executes Hermes. GEPA's normal predictor trace therefore contains the actual remote output and feedback. `program.json` and the installed Skill must represent the same optimized text.
+The selected native Skill body is the `dspy.Predict` signature instructions. The remote adapter writes those exact instructions into the repository Skill, preserving frontmatter; commits/pushes; publishes; and executes Hermes. GEPA's normal predictor trace therefore contains the actual remote output and feedback. The candidate tested remotely must match `program.json`. After rejection, the final installed Skill intentionally matches the baseline instead; `selected-release.json` records that final applied choice. Do not mistake a saved compiled candidate for an adopted release.
 
 Do not optimize an unused prompt while exporting an unchanged `skill_text` member. Do not fabricate a DSPy trace, simulate Hermes with a direct LLM answer, or present a text-only Skill experiment as remote acceptance.
 
