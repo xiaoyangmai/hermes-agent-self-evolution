@@ -97,18 +97,20 @@ class SkillModule(dspy.Module):
         You are an AI agent following specific skill instructions to complete a task.
         Read the skill instructions carefully and follow the procedure described.
         """
-        skill_instructions: str = dspy.InputField(desc="The skill instructions to follow")
         task_input: str = dspy.InputField(desc="The task to complete")
         output: str = dspy.OutputField(desc="Your response following the skill instructions")
 
     def __init__(self, skill_text: str):
         super().__init__()
-        self.skill_text = skill_text
-        self.predictor = dspy.ChainOfThought(self.TaskWithSkill)
+        self.predictor = dspy.ChainOfThought(self.TaskWithSkill.with_instructions(skill_text))
+
+    @property
+    def skill_text(self) -> str:
+        """Export the instructions DSPy actually optimized."""
+        return self.predictor.predict.signature.instructions
 
     def forward(self, task_input: str) -> dspy.Prediction:
         result = self.predictor(
-            skill_instructions=self.skill_text,
             task_input=task_input,
         )
         return dspy.Prediction(output=result.output)

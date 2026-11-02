@@ -104,36 +104,16 @@ class LLMJudge:
         )
 
 
-def skill_fitness_metric(example: dspy.Example, prediction: dspy.Prediction, trace=None) -> float:
-    """DSPy-compatible metric function for skill optimization.
-
-    This is what gets passed to dspy.GEPA(metric=...).
-    Returns a float 0-1 score.
-    """
-    # The prediction should have an 'output' field with the agent's response
-    agent_output = getattr(prediction, "output", "") or ""
-    expected = getattr(example, "expected_behavior", "") or ""
-    task = getattr(example, "task_input", "") or ""
-
-    if not agent_output.strip():
-        return 0.0
-
-    # Quick heuristic scoring (for speed during optimization)
-    # Full LLM-as-judge scoring is expensive — use it selectively
-    score = 0.5  # Base score for non-empty output
-
-    # Check if key phrases from expected behavior appear
-    expected_lower = expected.lower()
-    output_lower = agent_output.lower()
-
-    # Simple keyword overlap as a fast proxy
-    expected_words = set(expected_lower.split())
-    output_words = set(output_lower.split())
-    if expected_words:
-        overlap = len(expected_words & output_words) / len(expected_words)
-        score = 0.3 + (0.7 * overlap)
-
-    return min(1.0, max(0.0, score))
+def skill_fitness_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+    """Text-only evaluation. Real Hermes artifacts use the project DSPy metric."""
+    result = dspy.Predict(LLMJudge.JudgeSignature)(
+        task_input=example.task_input, expected_behavior=example.expected_behavior,
+        agent_output=prediction.output, skill_text="Evaluate observed output against the independent rubric.",
+    )
+    score = (0.5 * _parse_score(result.correctness)
+             + 0.3 * _parse_score(result.procedure_following)
+             + 0.2 * _parse_score(result.conciseness))
+    return dspy.Prediction(score=score, feedback=str(result.feedback))
 
 
 def _parse_score(value) -> float:

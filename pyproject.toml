@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-agent-self-evolution"
-version = "0.1.0"
-description = "Evolutionary self-improvement for Hermes Agent — optimize skills, prompts, tool descriptions, and code using DSPy + GEPA"
+version = "0.2.0"
+description = "DSPy + GEPA Skill optimization with real remote Hermes execution and automatic artifact evaluation"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -15,7 +15,8 @@ authors = [
 keywords = ["llm", "optimization", "evolution", "dspy", "gepa", "hermes", "agent"]
 
 dependencies = [
-    "dspy>=3.0.0",
+    "dspy==3.2.1",
+    "gepa==0.0.27",
     "openai>=1.0.0",
     "pyyaml>=6.0",
     "click>=8.0",
@@ -27,13 +28,18 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
 ]
+browser = ["playwright==1.64.1"]
 darwinian = [
     "darwinian-evolver",
 ]
 
 [project.urls]
-Homepage = "https://github.com/NousResearch/hermes-agent-self-evolution"
-Repository = "https://github.com/NousResearch/hermes-agent-self-evolution"
+Homepage = "https://github.com/xiaoyangmai/hermes-agent-self-evolution"
+Repository = "https://github.com/xiaoyangmai/hermes-agent-self-evolution"
+Upstream = "https://github.com/NousResearch/hermes-agent-self-evolution"
+
+[project.scripts]
+hermes-evolve = "evolution.dspy_loop:main"
 
 [tool.setuptools.packages.find]
 include = ["evolution*"]

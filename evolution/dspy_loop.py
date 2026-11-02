@@ -1,0 +1,172 @@
+"""DSPy compile -> real Hermes execution -> automatic adoption.
+
+The project supplies its task, grader and decision policy. DSPy owns candidate
+instructions and GEPA search; LLMHub owns deployment and artifact transport.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+from pathlib import Path
+import sys
+import uuid
+
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+import dspy
+
+from evolution.hermes_runtime import HermesRuntime, digest, git, write_json
+
+
+class Deliver(dspy.Signature):
+    """Execute the task with the deployed Skill and return verifiable artifact evidence."""
+    task_input: str = dspy.InputField()
+    output: str = dspy.OutputField(desc="Collected artifacts and actual execution trace")
+
+
+class HermesAdapter(dspy.Adapter):
+    def __init__(self, runtime):
+        super().__init__()
+        self.runtime = runtime
+
+    def __call__(self, lm, lm_kwargs, signature, demos, inputs):
+        # Standard Predict retains its real DSPy trace. Only the execution backend
+        # is remote; no proxy answer or fabricated predictor trace is introduced.
+        try:
+            return [{"output": self.runtime.execute(signature.instructions, inputs["task_input"])}]
+        except Exception as exc:
+            # DSPy normally converts execution exceptions to score zero. A broken
+            # deployment/transport is not evidence that a prompt is poor.
+            self.runtime.failure = exc
+            raise
+
+
+class HermesSkillProgram(dspy.Module):
+    def __init__(self, instructions, runtime):
+        super().__init__()
+        self.produce = dspy.Predict(Deliver.with_instructions(instructions))
+        self.remote_adapter = HermesAdapter(runtime)
+
+    def forward(self, task_input):
+        with dspy.context(adapter=self.remote_adapter):
+            return self.produce(task_input=task_input)
+
+
+def build_metric(project, judge_lm, runtime):
+    def metric(gold, pred, trace=None, pred_name=None, pred_trace=None):
+        evidence = json.loads(pred.output)
+        folder = Path(evidence["trial"])
+        path = folder / "grade.json"
+        if path.exists():
+            grade = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            # The project grader is outside the optimized program and receives
+            # artifacts, never candidate instructions or producer self-assessment.
+            try:
+                grade = project.grade(folder, json.loads(gold.task_input), judge_lm)
+            except Exception as exc:
+                runtime.failure = exc
+                raise
+            write_json(path, grade)
+        return dspy.Prediction(score=grade["score"], feedback=json.dumps({
+            "artifact_assessment": grade, "execution_evidence": evidence["trace"]}, ensure_ascii=False))
+    return metric
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", type=Path, required=True)
+    parser.add_argument("--project-module", default="harness.dspy_project")
+    parser.add_argument("--dataset", type=Path, required=True, help="Private train/validation/test JSON, outside the deployed repository")
+    parser.add_argument("--output", type=Path, required=True, help="Reuse to resume the same frozen experiment")
+    parser.add_argument("--max-metric-calls", type=int)
+    args = parser.parse_args()
+    repo, output = args.repo.resolve(), args.output.resolve()
+    if output.is_relative_to(repo) or args.dataset.resolve().is_relative_to(repo):
+        parser.error("Keep evidence and held-out cases outside the producer's repository")
+    if git(repo, "status", "--porcelain", "--untracked-files=no"):
+        parser.error("Commit authored project changes before running")
+    sys.path.insert(0, str(repo))
+    project = importlib.import_module(args.project_module)
+    dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
+    if any(not dataset.get(split) for split in ("train", "validation", "test")):
+        parser.error("Nonempty train, validation and test splits are required")
+    if set(dataset) != {"train", "validation", "test"}:
+        parser.error("Dataset must contain exactly train, validation and test")
+    cases = [c for split in dataset.values() for c in split]
+    if len({c["id"] for c in cases}) != len(cases):
+        parser.error("Case ids must be unique across splits, including replicas")
+    budget = args.max_metric_calls or project.POLICY["max_metric_calls"]
+    runtime = HermesRuntime(repo, project, output)
+    frozen = {"dataset_sha256": digest(args.dataset.read_bytes()), "project_module_sha256": digest(Path(project.__file__).read_bytes()),
+              "engine_sha256": digest(Path(__file__).read_bytes() + Path(__file__).with_name("hermes_runtime.py").read_bytes()),
+              "policy": project.POLICY, "max_metric_calls": budget, "optimizer": "dspy-3.2.1/gepa-0.0.27",
+              "reflection_model": os.environ["EVOLUTION_MODEL"], "judge_model": os.environ["EVOLUTION_JUDGE_MODEL"]}
+    manifest = output / "experiment.json"
+    if manifest.exists():
+        saved = json.loads(manifest.read_text(encoding="utf-8"))
+        if saved["contract"] != frozen:
+            raise RuntimeError("Experiment inputs changed; start a new evidence directory")
+        baseline_body = saved["baseline_body"]
+        runtime.experiment_id = saved["experiment_id"]
+    else:
+        baseline_body = runtime.initial_body
+        runtime.experiment_id = uuid.uuid4().hex
+        write_json(manifest, {"experiment_id": runtime.experiment_id, "contract": frozen, "baseline_body": baseline_body, "baseline_revision": git(repo, "rev-parse", "HEAD")})
+    lm_options = dict(api_base=os.environ["EVOLUTION_API_BASE"], api_key=os.environ["EVOLUTION_API_KEY"],
+                      max_tokens=6000, temperature=0.3, cache=False)
+    reflection_lm = dspy.LM(os.environ["EVOLUTION_MODEL"], **lm_options)
+    judge_lm = dspy.LM(os.environ["EVOLUTION_JUDGE_MODEL"], **lm_options)
+    dspy.configure(lm=reflection_lm, adapter=dspy.JSONAdapter())
+    calibration_path = output / "calibration.json"
+    if not calibration_path.exists():
+        write_json(calibration_path, project.calibrate(judge_lm))
+    if not json.loads(calibration_path.read_text(encoding="utf-8"))["passed"]:
+        raise RuntimeError("Grader calibration failed; no production search was started")
+    program = HermesSkillProgram(baseline_body, runtime)
+    metric = build_metric(project, judge_lm, runtime)
+    examples = {split: [dspy.Example(task_input=json.dumps(c, ensure_ascii=False, sort_keys=True)).with_inputs("task_input") for c in values]
+                for split, values in dataset.items()}
+    optimizer = dspy.GEPA(metric=metric, max_metric_calls=budget, reflection_lm=reflection_lm,
+                          reflection_minibatch_size=1, num_threads=1, track_stats=True,
+                          skip_perfect_score=False, use_merge=True, log_dir=str(output / "gepa"),
+                          gepa_kwargs={"stop_callbacks": lambda state: runtime.failure is not None})
+    selected_body = baseline_body
+    try:
+        compiled = optimizer.compile(program, trainset=examples["train"], valset=examples["validation"])
+        if runtime.failure:
+            raise RuntimeError("Search aborted: remote evidence is invalid") from runtime.failure
+        compiled.save(str(output / "program.json"))
+        write_json(output / "search.json", compiled.detailed_results.to_dict())
+        candidate_body = compiled.produce.signature.instructions
+        (output / "candidate_skill.md").write_text(candidate_body, encoding="utf-8")
+        comparison = {"baseline": [], "candidate": []}
+        # Held-out results never enter GEPA or trigger another edit in this run.
+        for index, example in enumerate(examples["test"]):
+            versions = [("baseline", program), ("candidate", compiled)]
+            if index % 2:
+                versions.reverse()
+            for label, item in versions:
+                pred = item(**example.inputs())
+                metric(example, pred)
+                folder = Path(json.loads(pred.output)["trial"])
+                grade = json.loads((folder / "grade.json").read_text(encoding="utf-8"))
+                comparison[label].append({"case_id": json.loads(example.task_input)["id"], "trial": str(folder), **grade})
+        decision = project.decide(comparison)
+        decision["changed"] = candidate_body.strip() != baseline_body.strip()
+        decision["adopt"] = decision["adopt"] and decision["changed"]
+        write_json(output / "comparison.json", comparison)
+        write_json(output / "decision.json", decision)
+        if decision["adopt"]:
+            selected_body = candidate_body
+    finally:
+        # Git restore commit + normal HTTP release; no reset/force push or direct
+        # edits to the installed profile. A failed trial cannot leave it selected.
+        revision, state = runtime.deploy(selected_body)
+        write_json(output / "selected-release.json", {"revision": revision, "state": state})
+    print(json.dumps({"output": str(output), "decision": decision}, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

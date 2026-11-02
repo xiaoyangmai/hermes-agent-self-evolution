@@ -1,5 +1,10 @@
 # Hermes Agent Self-Evolution — Evolutionary Self-Improvement for Hermes Agent
 
+> Upstream design context, retained for provenance. This is not the implemented
+> contract of this fork. The current remote DSPy loop, supported optimization
+> surface and automatic adoption rules are documented in [README.md](README.md).
+> Planned engines and human-review workflow below do not govern `hermes-evolve`.
+
 ## Vision
 
 A standalone optimization pipeline that systematically improves Hermes Agent's performance by evolving skills, prompts, tool descriptions, and agent configurations using automated optimization loops. Lives in its own repo (`NousResearch/hermes-agent-self-evolution`), operates ON hermes-agent — not part of it.

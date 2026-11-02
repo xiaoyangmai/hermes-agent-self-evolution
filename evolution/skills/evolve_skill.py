@@ -118,7 +118,7 @@ def evolve(
     # ── 3. Validate constraints on baseline ─────────────────────────────
     console.print(f"\n[bold]Validating baseline constraints[/bold]")
     validator = ConstraintValidator(config)
-    baseline_constraints = validator.validate_all(skill["body"], "skill")
+    baseline_constraints = validator.validate_all(skill["raw"], "skill")
     all_pass = True
     for c in baseline_constraints:
         icon = "✓" if c.passed else "✗"
@@ -152,29 +152,13 @@ def evolve(
 
     start_time = time.time()
 
-    try:
-        optimizer = dspy.GEPA(
-            metric=skill_fitness_metric,
-            max_steps=iterations,
-        )
-
-        optimized_module = optimizer.compile(
-            baseline_module,
-            trainset=trainset,
-            valset=valset,
-        )
-    except Exception as e:
-        # Fall back to MIPROv2 if GEPA isn't available in this DSPy version
-        console.print(f"[yellow]GEPA not available ({e}), falling back to MIPROv2[/yellow]")
-        optimizer = dspy.MIPROv2(
-            metric=skill_fitness_metric,
-            auto="light",
-        )
-        optimized_module = optimizer.compile(
-            baseline_module,
-            trainset=trainset,
-        )
-
+    optimizer = dspy.GEPA(
+        metric=skill_fitness_metric,
+        max_metric_calls=iterations,
+        reflection_lm=dspy.LM(optimizer_model),
+        num_threads=1,
+    )
+    optimized_module = optimizer.compile(baseline_module, trainset=trainset, valset=valset)
     elapsed = time.time() - start_time
     console.print(f"\n  Optimization completed in {elapsed:.1f}s")
 
@@ -185,7 +169,7 @@ def evolve(
 
     # ── 7. Validate evolved skill ───────────────────────────────────────
     console.print(f"\n[bold]Validating evolved skill[/bold]")
-    evolved_constraints = validator.validate_all(evolved_body, "skill", baseline_text=skill["body"])
+    evolved_constraints = validator.validate_all(evolved_full, "skill", baseline_text=skill["raw"])
     all_pass = True
     for c in evolved_constraints:
         icon = "✓" if c.passed else "✗"
@@ -203,6 +187,11 @@ def evolve(
         console.print(f"  Saved failed variant to {output_path}")
         return
 
+    if run_tests:
+        test_result = validator.run_test_suite(config.hermes_agent_path)
+        if not test_result.passed:
+            raise RuntimeError(test_result.message)
+
     # ── 8. Evaluate on holdout set ──────────────────────────────────────
     console.print(f"\n[bold]Evaluating on holdout set ({len(dataset.holdout)} examples)[/bold]")
 
@@ -215,11 +204,11 @@ def evolve(
         with dspy.context(lm=lm):
             baseline_pred = baseline_module(task_input=ex.task_input)
             baseline_score = skill_fitness_metric(ex, baseline_pred)
-            baseline_scores.append(baseline_score)
+            baseline_scores.append(baseline_score.score)
 
             evolved_pred = optimized_module(task_input=ex.task_input)
             evolved_score = skill_fitness_metric(ex, evolved_pred)
-            evolved_scores.append(evolved_score)
+            evolved_scores.append(evolved_score.score)
 
     avg_baseline = sum(baseline_scores) / max(1, len(baseline_scores))
     avg_evolved = sum(evolved_scores) / max(1, len(evolved_scores))

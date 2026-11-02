@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent System & Harness Governance"
+  short_description: "Design agent projects and evidence-based optimization"
+  default_prompt: "Use $codex-harness-governance to distinguish lightweight agent operation from project design, release and DSPy optimization; load only the references needed."
