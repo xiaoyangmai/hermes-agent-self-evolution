@@ -2,7 +2,8 @@
 import json
 import sys
 import threading
-from types import ModuleType
+import time
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import dspy
@@ -208,3 +209,94 @@ def test_failed_calibration_stops_search_and_production_release(tmp_path, monkey
             '--output', str(output), '--project-module', project.__name__, '--max-remote-runs', invalid])
         with pytest.raises(SystemExit):
             dspy_loop.main()
+
+
+@pytest.mark.parametrize('fail_judge', [False, True])
+def test_holdout_runs_four_in_parallel_preserves_pairs_and_blocks_failure(tmp_path, monkeypatch, fail_judge):
+    repo, output = tmp_path / 'repo', tmp_path / 'evidence'
+    repo.mkdir()
+    (repo / 'project.py').write_text('# frozen project')
+    project = ModuleType('_parallel_holdout_project')
+    project.__file__ = str(repo / 'project.py')
+    project.POLICY = {'max_metric_calls': 6, 'max_remote_runs': 16}
+    project.calibrate = lambda lm: {'passed': True}
+    def grade(folder, case, lm):
+        if fail_judge and case['id'] == 'test-a':
+            raise ConnectionError('judge unavailable')
+        return json.loads((folder / 'observation.json').read_text())
+    project.grade = grade
+    def decide(comparison):
+        assert [row['case_id'] for row in comparison['baseline']] == ['test-a', 'test-b']
+        assert [row['case_id'] for row in comparison['candidate']] == ['test-a', 'test-b']
+        return {'adopt': True}
+    project.decide = decide
+    monkeypatch.setitem(sys.modules, project.__name__, project)
+    barrier = threading.Barrier(4, timeout=10)
+    lock = threading.Lock()
+    active, peak, deployments = 0, 0, []
+    class Runtime:
+        initial_body, frontmatter, failure = 'Baseline', 'name: test', None
+        def __init__(self, repo, project, output):
+            self.output = output
+        def __deepcopy__(self, memo):
+            return self
+        def set_run_budget(self, limit):
+            pass
+        def resume_pending(self):
+            pass
+        def has_search_capacity(self, next_iteration, holdout):
+            return True
+        def observe_production_revision(self):
+            return 'production'
+        def verify_production_compatibility(self):
+            pass
+        def execute(self, instructions, task_input):
+            nonlocal active, peak
+            case = json.loads(task_input)
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            barrier.wait()
+            # Finish the second case first, to test result pairing independently of completion order.
+            if case['id'] == 'test-a':
+                time.sleep(0.05)
+            folder = self.output / 'trials' / digest((instructions + task_input).encode())
+            write_json(folder / 'observation.json', {'score': float(instructions == 'Candidate')})
+            write_json(folder / 'task.json', case)
+            with lock:
+                active -= 1
+            return json.dumps({'trial': str(folder), 'trace': {}})
+        def deploy(self, body):
+            deployments.append(body)
+            return 'selected', {}
+    class Optimizer:
+        def __init__(self, **kwargs):
+            pass
+        def compile(self, program, **kwargs):
+            candidate = dspy_loop.HermesSkillProgram('Candidate', program.remote_adapter.runtime)
+            candidate.detailed_results = SimpleNamespace(
+                candidates=[program, candidate], parents=[], val_aggregate_scores=[], val_subscores=[],
+                discovery_eval_counts=[], total_metric_calls=0, num_full_val_evals=0, best_idx=1, seed=0,
+                per_val_instance_best_candidates={})
+            return candidate
+    monkeypatch.setattr(dspy_loop, 'ParallelExperimentRuntime', Runtime)
+    monkeypatch.setattr(dspy, 'GEPA', Optimizer)
+    monkeypatch.setattr(dspy_loop, 'git', lambda repo, *args: '' if args[0] == 'status' else 'baseline')
+    for name, value in {'EVOLUTION_API_BASE': 'https://invalid.example/v1', 'EVOLUTION_API_KEY': 'unused',
+                        'EVOLUTION_MODEL': 'openai/test', 'EVOLUTION_JUDGE_MODEL': 'openai/test'}.items():
+        monkeypatch.setenv(name, value)
+    dataset = tmp_path / 'cases.json'
+    write_json(dataset, {'train': [{'id': 'train'}], 'validation': [{'id': 'validation'}],
+                         'test': [{'id': 'test-a'}, {'id': 'test-b'}]})
+    monkeypatch.setattr(sys, 'argv', ['hermes-evolve', '--repo', str(repo), '--dataset', str(dataset),
+                                     '--output', str(output), '--project-module', project.__name__])
+    if fail_judge:
+        with pytest.raises(ConnectionError, match='judge unavailable'):
+            dspy_loop.main()
+        assert not (output / 'decision.json').exists()
+        assert not deployments
+    else:
+        dspy_loop.main()
+        assert json.loads((output / 'decision.json').read_text())['adopt']
+        assert deployments == ['Candidate']
+    assert peak == 4

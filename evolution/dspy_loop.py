@@ -6,6 +6,7 @@ instructions and GEPA search; LLMHub owns deployment and artifact transport.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import importlib
 import json
 import os
@@ -241,16 +242,23 @@ def main():
         changed = candidate_body.strip() != baseline_body.strip()
         if changed:
             # Held-out results never enter GEPA or trigger another edit in this run.
+            jobs = []
             for index, example in enumerate(examples["test"]):
                 versions = [("baseline", program), ("candidate", compiled)]
                 if index % 2:
                     versions.reverse()
                 for label, item in versions:
-                    pred = item(**example.inputs())
-                    metric(example, pred)
-                    folder = Path(json.loads(pred.output)["trial"])
-                    grade = json.loads((folder / "grade.json").read_text(encoding="utf-8"))
-                    comparison[label].append({"case_id": json.loads(example.task_input)["id"], "trial": str(folder), **grade})
+                    jobs.append((label, item, example))
+            def evaluate_held_out(job):
+                label, item, example = job
+                pred = item(**example.inputs())
+                metric(example, pred)
+                folder = Path(json.loads(pred.output)["trial"])
+                grade = json.loads((folder / "grade.json").read_text(encoding="utf-8"))
+                return label, {"case_id": json.loads(example.task_input)["id"], "trial": str(folder), **grade}
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                for label, result in executor.map(evaluate_held_out, jobs):
+                    comparison[label].append(result)
             decision = {**project.decide(comparison), "changed": True}
         else:
             # An identical winner cannot improve the baseline. Preserve the
