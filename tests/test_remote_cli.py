@@ -1,11 +1,13 @@
 """Run the entire CLI with real DSPy search and a deterministic fake transport."""
 import json
 import sys
+import threading
 from types import ModuleType
 from unittest.mock import Mock
 
 import dspy
 import pytest
+from dspy.teleprompt.gepa.gepa_utils import DspyAdapter
 
 from evolution import dspy_loop
 from evolution.hermes_runtime import digest, write_json
@@ -26,6 +28,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     monkeypatch.setitem(sys.modules, project.__name__, project)
     deployments = []
     executions = []
+    execution_lock = threading.Lock()
 
     class Runtime:
         initial_body = "Produce an artifact."
@@ -35,17 +38,29 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
             self.output = output
         def __deepcopy__(self, memo):
             return self
+        def resume_pending(self):
+            pass
+        def has_search_capacity(self, next_iteration, holdout):
+            return True
         def execute(self, instructions, task_input):
-            executions.append(json.loads(task_input)['id'])
-            folder = self.output / "trials" / digest((instructions + task_input).encode())
-            write_json(folder / "observation.json", {"score": float("verify evidence" in instructions), "feedback": "Verify evidence."})
-            write_json(folder / "task.json", {"input": "Actual natural-language request for " + task_input})
+            with execution_lock:
+                executions.append(json.loads(task_input)['id'])
+                folder = self.output / "trials" / digest((instructions + task_input).encode())
+                if not (folder / "observation.json").exists():
+                    write_json(folder / "observation.json", {"score": float("verify evidence" in instructions), "feedback": "Verify evidence."})
+                    write_json(folder / "task.json", {"input": "Actual natural-language request for " + task_input})
             return json.dumps({"trial": str(folder), "trace": {"tools": ["actual-test-executor"]}})
         def deploy(self, instructions):
             deployments.append(instructions)
             return "selected-sha", {"installed": instructions}
 
-    monkeypatch.setattr(dspy_loop, "HermesRuntime", Runtime)
+    monkeypatch.setattr(dspy_loop, "ParallelExperimentRuntime", Runtime)
+    batches = []
+    original_batch = DspyAdapter.batch_evaluate
+    def batch(self, items, **kwargs):
+        batches.append(len(items))
+        return original_batch(self, items, **kwargs)
+    monkeypatch.setattr(DspyAdapter, 'batch_evaluate', batch)
     monkeypatch.setattr(dspy_loop, "git", lambda repo, *args: "" if args[0] == "status" else "baseline-sha")
     prompts = []
     def propose(self, prompt):
@@ -74,7 +89,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
             dspy_loop.main()
         assert (output / 'invalid-search.json').is_file()
         assert not (output / 'decision.json').exists()
-        assert deployments[-1] == Runtime.initial_body
+        assert not deployments
         with pytest.raises(RuntimeError, match='Invalid search checkpoint'):
             dspy_loop.main()
         assert not prompts  # No proposed candidate or selection history to lose.
@@ -96,19 +111,22 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     assert ('test' in executions) is improves
     search = json.loads((output / "search.json").read_text())
     assert ('verify evidence' in search['candidates'][search['best_idx']]['produce']) is improves
-    assert ('verify evidence' in deployments[-1]) is improves
+    assert bool(deployments) is improves
+    if improves:
+        assert 'verify evidence' in deployments[-1]
     if not improves:
         assert decision['held_out'] == 'not_run_no_changed_candidate'
         assert json.loads((output / 'comparison.json').read_text()) == {'baseline': [], 'candidate': []}
-        assert deployments[-1] == Runtime.initial_body
+        assert not deployments
     assert (output / "program.json").is_file()
     assert prompts and "actual_task_request" in prompts[0]
+    assert max(batches) >= 2
     assert "Actual natural-language request" in prompts[0]
     assert "reusable-artifact" in prompts[0]
     assert "not the literal message" in prompts[0]
     assert context.read_text() in prompts[0]
     assert (output / 'reflection-context.md').read_text() == context.read_text()
-    assert json.loads((output / "selected-release.json").read_text())["revision"] == "selected-sha"
+    assert json.loads((output / "selected-release.json").read_text())["revision"] == ('selected-sha' if improves else 'baseline-sha')
 
     manifest = json.loads((output / "experiment.json").read_text())
     manifest["contract"]["engine_sha256"] = "previous-export-only-version"
@@ -126,10 +144,47 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     def unavailable(self, instructions):
         raise RuntimeError("release unavailable")
     monkeypatch.setattr(Runtime, "deploy", unavailable)
-    with pytest.raises(RuntimeError, match="release unavailable"):
+    if improves:
+        with pytest.raises(RuntimeError, match="release unavailable"):
+            dspy_loop.main()
+    else:
         dspy_loop.main()
-    assert json.loads((output / "selected-release.json").read_text())["status"] == "pending"
+    assert json.loads((output / "selected-release.json").read_text())["status"] == ('pending' if improves else 'retained')
     repaired["contract"]["dataset_sha256"] = "different-cases"
     write_json(output / "experiment.json", repaired)
     with pytest.raises(RuntimeError, match="Experiment inputs changed"):
         dspy_loop.main()
+
+
+def test_failed_calibration_stops_search_and_production_release(tmp_path, monkeypatch):
+    repo, output = tmp_path / 'repo', tmp_path / 'evidence'
+    repo.mkdir()
+    project = ModuleType('_bad_calibration_project')
+    project.__file__ = str(repo / 'project.py')
+    (repo / 'project.py').write_text('# project')
+    project.POLICY = {'max_metric_calls': 6}
+    project.calibrate = lambda lm: {'passed': False}
+    monkeypatch.setitem(sys.modules, project.__name__, project)
+    class Runtime:
+        initial_body = 'baseline'
+        frontmatter = 'name: test'
+        experiment_id = ''
+        def __init__(self, *args):
+            pass
+        def resume_pending(self):
+            pass
+        def deploy(self, body):
+            raise AssertionError('Production release must not run')
+    monkeypatch.setattr(dspy_loop, 'ParallelExperimentRuntime', Runtime)
+    monkeypatch.setattr(dspy_loop, 'git', lambda repo, *args: '' if args[0] == 'status' else 'baseline')
+    for name, value in {'EVOLUTION_API_BASE': 'https://invalid.example/v1', 'EVOLUTION_API_KEY': 'unused',
+                        'EVOLUTION_MODEL': 'openai/test', 'EVOLUTION_JUDGE_MODEL': 'openai/test'}.items():
+        monkeypatch.setenv(name, value)
+    dataset = tmp_path / 'cases.json'
+    write_json(dataset, {s: [{'id': s}] for s in ('train', 'validation', 'test')})
+    monkeypatch.setattr(sys, 'argv', ['hermes-evolve', '--repo', str(repo), '--dataset', str(dataset),
+                                     '--output', str(output), '--project-module', project.__name__])
+    with pytest.raises(RuntimeError, match='calibration failed'):
+        dspy_loop.main()
+    assert not (output / 'gepa').exists()
+    assert not (output / 'selected-release.json').exists()

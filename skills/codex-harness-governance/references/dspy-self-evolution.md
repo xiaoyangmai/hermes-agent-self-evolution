@@ -27,12 +27,14 @@ Bind reflection to the fixed Skill identity and the actual runtime request, not 
 
 ## Prepare the experiment
 
-1. Read current engine README, project adapter and applicable repository instructions. Verify installed DSPy/GEPA versions and actual Gateway capabilities. The validated pins are DSPy 3.2.1 and GEPA 0.0.27; upgrades need integration verification.
+1. Read current engine README, project adapter and applicable repository instructions. Verify installed DSPy/GEPA versions and actual Gateway capabilities; dependency upgrades need integration verification.
 2. State the useful output and observable failure mechanism. Choose the optimizable file and freeze other behavior inputs. The current demo targets a four-page illustrated children's comic with two interactive questions and a practical ending. Earlier learning-page experiments remain different contracts; their scores are not comparable.
 3. Define the project task, result/manifest, fixed environment scripts, trace-loading check, artifact checker, independent model rubric and adoption rule in its adapter. Do not copy the demo's educational rubric to unrelated products.
 4. Keep private cases and evidence outside the producer repository. Train feeds proposals, validation selects candidates, held-out cases decide adoption once. Give replicas different ids; repeated evaluation of the same candidate/case is a cached observation, not a new replicate.
 5. Freeze cases, policy, code, models, budgets and baseline before production. Calibrate semantic boundaries automatically using positive/negative controls. No human grading fallback; a failed or uncertain gate prevents adoption.
-6. Reserve the shared project/Gateway during search. This control-plane syncs the registered remote HEAD and refreshes the registered roster, so serial operation and exact revision checks matter. Never invent per-profile update isolation the API does not provide.
+6. Verify the deployed control-plane's actual isolation and release contract. The existing shared Gateway and global profile names require serial candidate changes: project sync fetches HEAD and refresh affects the registered roster. Do not just raise `num_threads` or claim per-profile isolation. Only use simultaneous candidates once separate checkouts, Hermes homes, installed Skills, sessions, artifact paths and Gateway lifecycles have been implemented and verified.
+
+For an authorized parallel experiment, freeze each candidate's committed source revision and environment before running its independent cases; collect all runs before changing that runtime. The approved demo project has a global maximum of four concurrent production tasks across all candidates, not four per candidate. Bound judge concurrency separately and count all failures and retries in the budget. A stated prompt-level image limit is not an enforced billing cap. Prefer the installed GEPA's native batch/proposal interfaces over a second search scheduler; new upstream capabilities require a compatible pinned version and real adapter integration. Separate research candidates from the production release, and promote only after the unchanged automatic adoption gate passes.
 
 ## Execute and inspect
 

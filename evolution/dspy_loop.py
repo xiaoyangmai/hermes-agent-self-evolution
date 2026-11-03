@@ -11,13 +11,16 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
 import uuid
 
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 import dspy
 from gepa.strategies.instruction_proposal import InstructionProposalSignature
+from gepa.strategies.proposal_sampling import SameParentSampling
 
 from evolution.hermes_runtime import HermesRuntime, digest, git, write_json
+from evolution.experiment_runtime import ParallelExperimentRuntime
 
 
 class Deliver(dspy.Signature):
@@ -59,10 +62,10 @@ def instruction_proposer(lm, fixed_identity, reflection_context=''):
 """ + fixed_identity + """
 Current Skill body:
 ```
-<curr_instructions>
+<curr_param>
 ```
 Observed executions and independent feedback:
-<inputs_outputs_feedback>
+<side_info>
 
 The input task_input is serialized harness case metadata, not the literal message
 Hermes receives. The actual user request is supplied in actual_task_request.
@@ -96,21 +99,24 @@ frontmatter. Do not change the task input protocol or the Skill's declared scope
 
 
 def build_metric(project, judge_lm, runtime):
+    locks = {}
+    guard = threading.Lock()
     def metric(gold, pred, trace=None, pred_name=None, pred_trace=None):
         evidence = json.loads(pred.output)
         folder = Path(evidence["trial"])
         path = folder / "grade.json"
-        if path.exists():
-            grade = json.loads(path.read_text(encoding="utf-8"))
-        else:
-            # The project grader is outside the optimized program and receives
-            # artifacts, never candidate instructions or producer self-assessment.
-            try:
-                grade = project.grade(folder, json.loads(gold.task_input), judge_lm)
-            except Exception as exc:
-                runtime.failure = exc
-                raise
-            write_json(path, grade)
+        with guard:
+            lock = locks.setdefault(folder, threading.Lock())
+        with lock:
+            if path.exists():
+                grade = json.loads(path.read_text(encoding="utf-8"))
+            else:
+                try:
+                    grade = project.grade(folder, json.loads(gold.task_input), judge_lm)
+                except Exception as exc:
+                    runtime.failure = exc
+                    raise
+                write_json(path, grade)
         return dspy.Prediction(score=grade["score"], feedback=json.dumps({
             "actual_task_request": json.loads((folder / "task.json").read_text(encoding="utf-8")),
             "artifact_assessment": grade, "execution_evidence": evidence["trace"]}, ensure_ascii=False))
@@ -146,18 +152,20 @@ def main():
         parser.error("Case ids must be unique across splits, including replicas")
     budget = args.max_metric_calls or project.POLICY["max_metric_calls"]
     reflection_context = args.reflection_context.read_text(encoding='utf-8') if args.reflection_context else ''
-    runtime = HermesRuntime(repo, project, output)
-    optimizer_settings = {"reflection_minibatch_size": min(3, len(dataset["train"])),
-                          "skip_perfect_score": True, "use_merge": True}
+    runtime = ParallelExperimentRuntime(repo, project, output)
+    optimizer_settings = {"reflection_minibatch_size": 1,
+                          "skip_perfect_score": True, "use_merge": False}
     frozen = {"dataset_sha256": digest(args.dataset.read_bytes()), "project_module_sha256": digest(Path(project.__file__).read_bytes()),
-              "engine_sha256": digest(Path(__file__).read_bytes() + Path(__file__).with_name("hermes_runtime.py").read_bytes()),
-              "policy": project.POLICY, "max_metric_calls": budget, "optimizer": "dspy-3.2.1/gepa-0.0.27",
+              "engine_sha256": digest(Path(__file__).read_bytes() + Path(__file__).with_name("hermes_runtime.py").read_bytes() + Path(__file__).with_name("experiment_runtime.py").read_bytes()),
+              "policy": project.POLICY, "max_metric_calls": budget, "optimizer": "dspy-3.3.1/gepa-0.1.4",
               "optimizer_settings": optimizer_settings, "fixed_skill_identity": runtime.frontmatter,
               "reflection_model": os.environ["EVOLUTION_MODEL"], "judge_model": os.environ["EVOLUTION_JUDGE_MODEL"],
               "reflection_context_sha256": digest(reflection_context.encode())}
     manifest = output / "experiment.json"
     if manifest.exists():
         saved = json.loads(manifest.read_text(encoding="utf-8"))
+        if git(repo, 'rev-parse', 'HEAD') != saved['baseline_revision']:
+            raise RuntimeError('Baseline source changed; start a new experiment')
         changed = {k for k in frozen if saved["contract"].get(k) != frozen[k]}
         if changed == {"engine_sha256"} and args.resume_engine_fix:
             saved.setdefault("engine_repairs", []).append({"previous_sha256": saved["contract"]["engine_sha256"],
@@ -174,6 +182,7 @@ def main():
         write_json(manifest, {"experiment_id": runtime.experiment_id, "contract": frozen, "baseline_body": baseline_body, "baseline_revision": git(repo, "rev-parse", "HEAD")})
     if reflection_context:
         (output / 'reflection-context.md').write_text(reflection_context, encoding='utf-8')
+    runtime.resume_pending()
     lm_options = dict(api_base=os.environ["EVOLUTION_API_BASE"], api_key=os.environ["EVOLUTION_API_KEY"],
                       max_tokens=6000, temperature=0.3, cache=False)
     reflection_lm = dspy.LM(os.environ["EVOLUTION_MODEL"], **lm_options)
@@ -188,10 +197,19 @@ def main():
     metric = build_metric(project, judge_lm, runtime)
     examples = {split: [dspy.Example(task_input=json.dumps(c, ensure_ascii=False, sort_keys=True)).with_inputs("task_input") for c in values]
                 for split, values in dataset.items()}
+    holdout_reserve = 2 * len(dataset['test'])
+    # Two sampled minibatches: one parent on up to two cases, two proposed
+    # candidates on one case each, and at most two full validation batches.
+    iteration_reserve = min(2, len(dataset['train'])) + 2 + 2 * len(dataset['validation'])
+    initial_validation = 0 if (output / 'gepa').exists() else len(dataset['validation'])
+    if not runtime.has_search_capacity(initial_validation, holdout_reserve):
+        raise RuntimeError('Insufficient remote-run budget for baseline validation and held-out comparison')
     optimizer = dspy.GEPA(metric=metric, max_metric_calls=budget, reflection_lm=reflection_lm,
                           instruction_proposer=instruction_proposer(reflection_lm, runtime.frontmatter, reflection_context),
-                          **optimizer_settings, num_threads=1, track_stats=True, log_dir=str(output / "gepa"),
-                          gepa_kwargs={"stop_callbacks": lambda state: runtime.failure is not None})
+                          **optimizer_settings, num_threads=4, track_stats=True, log_dir=str(output / "gepa"),
+                          gepa_kwargs={"stop_callbacks": lambda state: runtime.failure is not None or
+                                       not runtime.has_search_capacity(iteration_reserve, holdout_reserve),
+                                       "sampling_strategy": SameParentSampling(n=2)})
     selected_body = baseline_body
     write_json(output / "selected-release.json", {"status": "pending", "experiment_id": runtime.experiment_id})
     try:
@@ -242,11 +260,18 @@ def main():
             write_json(output / 'invalid-search.json', {'experiment_id': runtime.experiment_id,
                        'error': str(runtime.failure), 'checkpoint': 'gepa',
                        'status': 'invalid_evaluation_requires_audited_recovery'})
-        # Git restore commit + normal HTTP release; no reset/force push or direct
-        # edits to the installed profile. A failed trial cannot leave it selected.
-        revision, state = runtime.deploy(selected_body)
-        write_json(output / "selected-release.json", {"status": "applied", "experiment_id": runtime.experiment_id,
-                                                      "revision": revision, "state": state})
+        # Experiments use isolated instances, so rejection or an interrupted search
+        # leaves production untouched. Only an adopted candidate is published.
+        if selected_body != baseline_body:
+            expected_base = json.loads(manifest.read_text(encoding='utf-8'))['baseline_revision']
+            if git(repo, 'rev-parse', 'HEAD') != expected_base:
+                raise RuntimeError('Production source changed during the experiment; publication stopped')
+            revision, state = runtime.deploy(selected_body)
+            release = {"status": "applied", "revision": revision, "state": state}
+        else:
+            release = {"status": "retained", "revision": git(repo, "rev-parse", "HEAD"),
+                       "verified": False}
+        write_json(output / "selected-release.json", {"experiment_id": runtime.experiment_id, **release})
     print(json.dumps({"output": str(output), "decision": decision}, ensure_ascii=False))
 
 

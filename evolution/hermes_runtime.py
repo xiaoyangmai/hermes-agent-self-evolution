@@ -76,11 +76,11 @@ class HermesRuntime:
                     raise
                 time.sleep(attempt + 1)
 
-    def operation(self, path, receipt: Path, key: str):
+    def operation(self, path, receipt: Path, key: str, body=None):
         if receipt.exists():
             record = json.loads(receipt.read_text(encoding="utf-8"))
         else:
-            record = self.request(path, {}, key=key)
+            record = self.request(path, {} if body is None else body, key=key)
             write_json(receipt, record)
         deadline = time.monotonic() + 900
         while record["status"] not in ("succeeded", "failed", "cancelled"):
@@ -175,7 +175,10 @@ class HermesRuntime:
             revision, before = self.deploy(instructions)
             receipt.update(revision=revision, before=before)
             write_json(receipt_file, receipt)
-            task = self.project.task(case, receipt["delivery_id"], receipt["revision"])
+            if hasattr(self, 'project_home'):
+                task = self.project.task(case, receipt["delivery_id"], receipt["revision"], project_home=self.project_home)
+            else:
+                task = self.project.task(case, receipt["delivery_id"], receipt["revision"])
             write_json(folder / "task.json", task)
             submitted = self.request(prefix, task, gateway=True, key=receipt["delivery_id"])
             receipt.update(gateway_run_id=submitted["run_id"], status="running", deadline=time.time() + self.timeout)

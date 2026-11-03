@@ -2,6 +2,10 @@
 
 Subagents are a context and ownership tool, not a default sign of a sophisticated system.
 
+For Codex-led product acceptance, candidate comparison or claims of quality improvement, delegate an independent assessment without inheriting the development conversation. Give the evaluator the user goal, frozen rubric, anonymized actual artifact, and necessary interaction evidence; omit author explanations, candidate identities, previous scores, and optimization hypotheses. A fresh conversation still inherits system instructions and may access shared files: constrain the evidence packet and record any exposure. If delegation is unavailable, report that limitation rather than claiming a blind review. Existing independent project evaluators need not be duplicated by a Codex subagent for every sample.
+
+For diagnosis, ask for observations before supplying candidate history or trace interpretations, then provide the relevant raw trace for causal analysis. Independent research or rubric review can also be delegated without the parent's favored conclusion. In contrast, retain baseline, exposed cases, prior failures, receipts and consumed budget in the orchestrator; a fresh evaluator must not reset experiment history. Summarize independently obtained findings only after each assessment has finished.
+
 ## Use a subagent when
 
 - the work can run independently and in parallel;

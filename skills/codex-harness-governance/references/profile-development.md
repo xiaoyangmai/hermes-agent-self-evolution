@@ -12,6 +12,8 @@ Describe the intended user, useful deliverable, inputs, allowed resources, and o
 
 Before adding instructions, inspect the relevant trace and actual artifact. Record the smallest evidence that explains the problem: the task condition, observed decision, tool result or artifact excerpt, and its consequence. Separate observed facts from the proposed explanation.
 
+For a decisive artifact defect, distinguish whether the instructions requested the correct behavior, the tool output violated it, the observer detected it, and the producer acted on the observation. Choose the owning layer before changing a profile. Inspect independently observed evidence first, then use the trace and prior hypotheses to test plausible causes rather than treating correlation as proof.
+
 | Observed problem | First place to investigate |
 | --- | --- |
 | Instructions were absent, stale, or not loaded | Packaging, deployment, discovery, and context loading |

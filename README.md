@@ -29,7 +29,7 @@ pip install -e '.[dev,browser]'
 
 Run the command in the environment where it was installed. With a Windows `.venv`, use `.venv\Scripts\hermes-evolve.exe` (or activate that environment first); installation into a virtual environment does not add it to the global PATH.
 
-Dependencies pin DSPy 3.2.1 and GEPA 0.0.27. The [demo project](https://github.com/xiaoyangmai/demo-team) uses Playwright with an installed Edge browser. Another project may use different artifact checks without installing browser dependencies. `LITELLM_LOCAL_MODEL_COST_MAP=True` is set before DSPy import so startup does not depend on downloading a cost map; no cost estimate is asserted from that map.
+Dependencies pin DSPy 3.3.1 and GEPA 0.1.4. The [demo project](https://github.com/xiaoyangmai/demo-team) uses Playwright with an installed Edge browser. Another project may use different artifact checks without installing browser dependencies. `LITELLM_LOCAL_MODEL_COST_MAP=True` is set before DSPy import so startup does not depend on downloading a cost map; no cost estimate is asserted from that map.
 
 Set these environment variables using your credential manager or local session, never a committed file:
 
@@ -59,7 +59,7 @@ A project module, by default `harness.dspy_project`, exports:
 
 Keep private cases and outputs outside the deployed Git repository. Dataset JSON contains exactly `train`, `validation`, `test`, each a nonempty list of cases with globally unique `id`; case-specific fields belong to the project. Different replica ids mean separate real runs. Train and validation feed search; test results never feed another candidate in that experiment.
 
-Reflection receives the fixed Skill identity, actual natural-language Gateway request, artifact grades and execution evidence. Internal DSPy case JSON is explicitly distinguished from the runtime input. The proposer compares up to three training cases and requests the smallest reusable procedural change, keeping topic-specific advice conditional. This prevents a sampled topic from silently redefining the Skill's purpose; held-out regression gates still decide whether it worked. The custom `instruction_proposer` uses GEPA's renderer/extractor because DSPy 3.2.1's adapter does not forward GEPA's native reflection-template option. Optimizer settings and Skill identity are frozen with the experiment.
+Reflection receives the fixed Skill identity, actual natural-language Gateway request, artifact grades and execution evidence. Internal DSPy case JSON is explicitly distinguished from the runtime input. The proposer compares up to three training cases and requests the smallest reusable procedural change, keeping topic-specific advice conditional. This prevents a sampled topic from silently redefining the Skill's purpose; held-out regression gates still decide whether it worked. The custom `instruction_proposer` uses GEPA's renderer/extractor with the version-pinned template. Optimizer settings and Skill identity are frozen with the experiment.
 
 An optional `--reflection-context /private/hypothesis.md` connects reviewed prior evidence and external research to the proposal. The file is hashed with the experiment and copied into its evidence directory; it is not supplied to the grader. Changed context requires a new experiment. This is a bounded design input, not autonomous browsing or another optimization scheduler.
 
@@ -69,19 +69,19 @@ hermes-evolve --repo /path/to/demo-team \
   --output /private/experiment/evidence
 ```
 
-Commit authored changes before invocation. The command intentionally creates and pushes ordinary candidate commits to the registered repository's current branch. LLMHub sync currently pulls remote HEAD, so reserve this project for the experiment and do not concurrently edit/push it. A local git status and exact remote revision comparison enforce the observed source boundary. Four named demo profiles are retained; only frontend's declared Skill body is optimized.
+Commit authored changes before invocation. Candidate commits are created from the frozen baseline in separate local checkouts and pushed to `evolution/<experiment-id>/...` branches; the production branch is not modified during search. Two isolated Hermes instances run up to four tasks per optimization process. Reserve both instances for the entire experiment: this client has no cross-process or cross-client lease. A process-local limit is not a global multi-client concurrency limit.
 
 The finite loop performs:
 
 1. Freeze dataset, project/engine source hashes, policy, models and baseline. Calibrate automatic graders.
 2. GEPA proposes/evaluates candidates within the metric-call budget. Unique candidate/case executions have durable receipts; repeated optimizer evaluation uses the same observation, not a fresh best-of sample.
-3. Commit/push → project sync → environment check/controlled prepare → idle-profile check → one refresh → installed hash verification.
+3. Commit/push candidate → release its exact SHA to an isolated instance → environment check → installed hash verification. Matching candidates share an installed instance without refreshing during active tasks.
 4. Submit a fresh remote task, poll the original run/deadline, collect durable tool history and verify Skill loading. Check runtime context again at termination.
 5. Finalize the explicit delivery id, fetch result and manifest, download bytes, verify artifact id and SHA-256, and evaluate independently.
 6. Save the compiled DSPy program and select by validation. If the selected Skill is unchanged, record `search_retained_baseline` without consuming held-out cases. Otherwise run the counterbalanced baseline/candidate held-out comparison.
-7. Apply the project's frozen adoption gate. Restore baseline on rejection/error using a normal commit and HTTP release; verify effective installed state. No force push, hidden runtime patch or human grading.
+7. Apply the project's frozen adoption gate. On rejection or error production is not changed; the retained revision is recorded without claiming a fresh production check. On adoption, verify the production source has not changed, then publish through the normal path. No force push, hidden runtime patch or human grading.
 
-GEPA's metric-call budget counts evaluations, including cached observations. `max_remote_runs` separately caps actual task submissions. Each task has a fixed elapsed-time budget. A stop request is not terminal evidence; an unresolved active task blocks refresh and must be recovered before continuing.
+GEPA's metric-call budget counts evaluations, including cached observations. `max_remote_runs` separately caps actual task submissions. The search reserves two runs per held-out case and stops before the next two-proposal iteration if its worst-case uncached evaluations would consume that reserve. Merge is disabled so that bound is explicit. Each task has a fixed elapsed-time budget. A stop request is not terminal evidence; submitted but unfinished receipts are resumed with their original slot and deadline before search can change an instance.
 
 ## Evidence, failures and resume
 
