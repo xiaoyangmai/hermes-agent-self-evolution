@@ -54,6 +54,16 @@ Use `release` only for an intended project release: it compares the sync SHA, ch
 
 `collect` normally derives a stable finalize idempotency key from the project and delivery ID. If a finalize is confirmed failed and its cause has been corrected, use a new unique `--finalize-key` for that new operation; do not change keys while the original outcome is unknown. The operator does not perform the project's deterministic or model-based evaluation.
 
+## HTTPS model transport for local evaluation
+
+When the deployed control service exposes it, `POST /v1/evaluator/chat/completions` forwards a non-streaming OpenAI-compatible JSON request to one fixed in-cluster inference gateway. This is model transport only: it does not run Hermes, evaluate artifacts, choose candidates, or publish. Verify the live endpoint and its contract before relying on it; deployments can differ.
+
+The request uses **two distinct credentials**: `X-Hermes-Control-Authorization: Bearer <control-token>` authenticates to the control service, while `Authorization: Bearer <model-selector>` selects the upstream model route. The service does not forward the control credential. The control token has the existing service-wide management authority, not project-scoped evaluator permissions; the model selector is not a substitute for control authentication. Obtain both from the authorized local secret environment or secret manager and never place them in repositories, Skills, prompts, experiment reasons, or logs. The observed gateway's selector is routing input, not proof of client authentication; do not expose that gateway directly on this basis.
+
+For the current Self-Evolution client, set `EVOLUTION_API_BASE` to `${HERMES_CONTROL_URL%/}/v1/evaluator` (the SDK appends `/chat/completions`), `EVOLUTION_API_KEY` to the model selector, and `EVOLUTION_CONTROL_AUTHORIZATION` to the raw control token, without the `Bearer` prefix. For long evaluations, `EVOLUTION_MODEL_TIMEOUT=1800` and `EVOLUTION_MODEL_NO_RETRY=1` are available; these are transport settings, not grading or search policy. The current ingress accepts up to 16 MiB per request and eight concurrent evaluator connections per client, subject to rate limits; these limits do not enforce the separate maximum on producer tasks. The endpoint only supports `stream: false` and does not propagate `Retry-After`.
+
+A client disconnect or timeout does not guarantee cancellation of upstream inference. A failed request may already have incurred provider charges; retain it as a failed call with usage and cost unknown when not reported, and avoid automatic retries that may duplicate the call. If restoring a frozen experiment after a transport-only or cached-run budget-accounting repair, preserve the failed state and follow the audited `--resume-engine-fix` recovery described in [DSPy Self-Evolution](dspy-self-evolution.md); do not change the rubric or erase consumed producer runs.
+
 ## Project registration
 
 Register a project once before using its profile or gateway controls:

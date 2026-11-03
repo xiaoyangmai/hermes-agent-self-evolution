@@ -42,7 +42,7 @@ For an authorized parallel experiment, freeze each candidate's committed source 
 
 Use the installed `hermes-evolve --repo ... --dataset ... --output ...` entrypoint; credentials come from environment variables documented by the engine, never from this Skill. Obtain profile Gateway keys through the control API; model API credentials are separate.
 
-Resolve the engine's Python environment before invoking it; a virtual-environment installation is not necessarily on PATH. Use its `bin/hermes-evolve` or Windows `Scripts/hermes-evolve.exe`, or activate the environment. Verify the configured model endpoint is reachable separately from the Hermes task API.
+Resolve the engine's Python environment before invoking it; a virtual-environment installation is not necessarily on PATH. Use its `bin/hermes-evolve` or Windows `Scripts/hermes-evolve.exe`, or activate the environment. Verify the configured model endpoint is reachable separately from the Hermes task API. If using the supplied authenticated endpoint, read its [HTTPS model transport contract](hermes-control-plane.md#https-model-transport-for-local-evaluation).
 
 The engine owns commit/push, sync, environment check/prepare, refresh, installed hash verification, actual task submission, terminal observation, trace collection, finalize and downloads. See [control-plane contracts](hermes-control-plane.md) for the transport. Do not additionally invoke a manual release/round loop around each engine call.
 
@@ -60,7 +60,7 @@ Infrastructure, model access and context-drift errors invalidate an experiment; 
 
 Check `invalid-search.json` before resuming after an evaluation failure: DSPy may have cached the exception as a zero. Preserve the invalid optimizer state. Before the first proposal, audited recovery may quarantine that state and marker and replay the initial observations, retaining all receipts, valid cached grades, frozen inputs and consumed remote-run budget. Collect or grade the original unfinished artifact; do not regenerate it or rerate valid observations. Verify that no proposal or candidate-selection history is lost and distinguish replayed metrics from new executions. After proposals begin, recovery requires a known valid checkpoint or a new, explicitly budgeted experiment. Follow the engine's recovery contract; never quietly accept the cached zero or erase prior valid search work.
 
-If only transport or result export code was repaired, the engine supports `--resume-engine-fix "audited reason"` while retaining previous/new engine hashes. All other frozen inputs must still match. Verify the diff did not change proposals, production behavior or grading; otherwise start a new experiment. This preserves valid observations without disguising changed experimental conditions.
+If only transport, result export, or cached-run budget accounting was repaired without changing the hard run limit or held-out reservation, the engine supports `--resume-engine-fix "audited reason"` while retaining previous/new engine hashes. All other frozen inputs must still match. Verify the diff did not change proposals, production behavior or grading; otherwise start a new experiment. This preserves valid observations without disguising changed experimental conditions.
 
 ## Decide without concealing regression
 
