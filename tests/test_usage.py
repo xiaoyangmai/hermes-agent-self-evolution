@@ -52,7 +52,7 @@ def test_dspy_predict_usage_is_recorded_in_independent_threads(tmp_path, monkeyp
     ledger = UsageLedger(tmp_path / 'model-usage.jsonl')
     lm = AccountingLM('openai/test', ledger=ledger, role='calibration', api_key='unused', cache=False)
     def evaluate(n):
-        with dspy.context(lm=lm):
+        with dspy.context(lm=lm, adapter=dspy.ChatAdapter()):
             return dspy.Predict('question -> answer')(question='private ' + str(n)).answer
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert list(pool.map(evaluate, range(4))) == ['yes'] * 4

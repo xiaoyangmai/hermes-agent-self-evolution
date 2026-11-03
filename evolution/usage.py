@@ -19,7 +19,7 @@ class UsageLedger:
         # response_cost can be a local estimate and is deliberately ignored.
         cost = usage.get('cost')
         cost = cost if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None
-        tokens = {key: usage[key] for key in ('prompt_tokens', 'completion_tokens', 'total_tokens')
+        tokens = {key: usage[key] for key in ('prompt_tokens', 'completion_tokens', 'input_tokens', 'output_tokens', 'total_tokens')
                   if type(usage.get(key)) is int and usage[key] >= 0}
         row = {'role': role, 'status': 'completed' if response is not None else 'failed',
                'tokens': tokens if tokens else None, 'cost': cost,
