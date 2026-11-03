@@ -1,5 +1,8 @@
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
 import dspy
 import pytest
@@ -72,3 +75,75 @@ def test_unwritable_ledger_does_not_interrupt_model_response(tmp_path, monkeypat
     with pytest.warns(RuntimeWarning, match='usage could not be recorded'):
         assert lm(prompt='private') == ['ok']
     assert ledger.recording_failed
+
+
+@pytest.mark.parametrize('controlled', [False, True])
+def test_litellm_transmits_separate_headers_and_no_retry_on_error(tmp_path, controlled):
+    requests = []
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            requests.append((self.headers.get('Authorization'), self.headers.get('X-Hermes-Control-Authorization'), body))
+            self.send_response(500 if controlled else 200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': {'message': 'test'}} if controlled else
+                {'id': 'test', 'model': 'test', 'choices': [{'index': 0, 'message':
+                    {'role': 'assistant', 'content': 'ok'}, 'finish_reason': 'stop'}]}).encode())
+        def log_message(self, *args):
+            pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        options = {'api_base': f'http://127.0.0.1:{server.server_port}/v1',
+                   'api_key': 'selector-test', 'cache': False}
+        if controlled:
+            options.update(extra_headers={'X-Hermes-Control-Authorization': 'Bearer control-test'},
+                           num_retries=0, max_retries=0, timeout=30)
+        ledger = UsageLedger(tmp_path / 'model-usage.jsonl')
+        lm = AccountingLM('openai/test', ledger=ledger, role='evaluation', **options)
+        if controlled:
+            with pytest.raises(dspy.LMError):
+                lm(prompt='test')
+            assert len(requests) == 1 and requests[0][:2] == ('Bearer selector-test', 'Bearer control-test')
+            assert json.loads(ledger.path.read_text())['status'] == 'failed'
+        else:
+            assert lm(prompt='test') == ['ok']
+            assert len(requests) == 1 and requests[0][:2] == ('Bearer selector-test', None)
+        assert not {'max_retries', 'num_retries', 'extra_headers', 'timeout'} & requests[0][2].keys()
+        assert 'control-test' not in json.dumps(requests[0][2])
+        assert 'control-test' not in ledger.path.read_text() and 'selector-test' not in ledger.path.read_text()
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_model_timeout_is_failed_once_with_unknown_usage(tmp_path):
+    requests = []
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers['Content-Length']))
+            requests.append(True)
+            time.sleep(0.5)
+        def log_message(self, *args):
+            pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        ledger = UsageLedger(tmp_path / 'model-usage.jsonl')
+        lm = AccountingLM('openai/test', ledger=ledger, role='evaluation',
+                          api_base=f'http://127.0.0.1:{server.server_port}/v1',
+                          api_key='selector-test', cache=False, timeout=0.1,
+                          num_retries=0, max_retries=0)
+        with pytest.raises(dspy.LMError):
+            lm(prompt='test')
+        assert len(requests) == 1
+        record = json.loads(ledger.path.read_text())
+        assert record['status'] == 'failed' and record['tokens'] is None and record['cost'] is None
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()

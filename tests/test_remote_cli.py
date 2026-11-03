@@ -78,6 +78,19 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     for name, value in {"EVOLUTION_API_BASE": "https://invalid.example/v1", "EVOLUTION_API_KEY": "unused",
                         "EVOLUTION_MODEL": "openai/test", "EVOLUTION_JUDGE_MODEL": "openai/test"}.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.delenv('EVOLUTION_CONTROL_AUTHORIZATION', raising=False)
+    monkeypatch.delenv('EVOLUTION_MODEL_NO_RETRY', raising=False)
+    monkeypatch.delenv('EVOLUTION_MODEL_TIMEOUT', raising=False)
+    if improves:
+        monkeypatch.setenv('EVOLUTION_CONTROL_AUTHORIZATION', 'test-control-secret')
+        monkeypatch.setenv('EVOLUTION_MODEL_NO_RETRY', '1')
+        monkeypatch.setenv('EVOLUTION_MODEL_TIMEOUT', '1800')
+    options_seen = []
+    original_init = dspy_loop.AccountingLM.__init__
+    def capture_options(self, model, **kwargs):
+        options_seen.append(kwargs.copy())
+        original_init(self, model, **kwargs)
+    monkeypatch.setattr(dspy_loop.AccountingLM, '__init__', capture_options)
     dataset = tmp_path / "cases.json"
     write_json(dataset, {split: [{"id": split}] for split in ("train", "validation", "test")})
     context = tmp_path / 'reflection.md'
@@ -140,6 +153,12 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
 
     manifest = json.loads((output / "experiment.json").read_text())
     assert manifest['contract']['max_remote_runs'] == 15
+    assert all(o.get('extra_headers') == ({'X-Hermes-Control-Authorization': 'Bearer test-control-secret'} if improves else None)
+               for o in options_seen)
+    assert all(o.get('timeout') == (1800 if improves else None) for o in options_seen)
+    assert all(o.get('num_retries') == (0 if improves else None) and o.get('max_retries') == (0 if improves else None)
+               for o in options_seen)
+    assert all(b'test-control-secret' not in p.read_bytes() for p in output.rglob('*') if p.is_file())
     monkeypatch.setattr(sys, 'argv', argv + ['--max-remote-runs', '16'])
     with pytest.raises(RuntimeError, match='Experiment inputs changed'):
         dspy_loop.main()

@@ -43,6 +43,18 @@ EVOLUTION_MODEL         DSPy model id for reflection, e.g. openai/<served-model>
 EVOLUTION_JUDGE_MODEL   DSPy model id for independent assessment
 ```
 
+For a model endpoint that requires a separate control-service credential, set
+`EVOLUTION_CONTROL_AUTHORIZATION` to the raw control token. The client sends it
+only in `X-Hermes-Control-Authorization: Bearer ...`; `Authorization` remains
+the model selector supplied by `EVOLUTION_API_KEY`. Do not put either value in
+the repository or an experiment reason. `EVOLUTION_MODEL_TIMEOUT` optionally
+sets the model-request timeout in seconds. `EVOLUTION_MODEL_NO_RETRY=1` disables
+automatic transport retries; without these options the existing defaults apply.
+An interrupted request can already have reached the provider and incurred cost;
+missing provider usage for failed calls remains unknown. A transport repair for
+an existing experiment must be recorded with `--resume-engine-fix`, without
+changing the model, data or scoring.
+
 Profile Gateway keys are fetched from the existing authenticated control API and kept in memory. The model API is separate from the Hermes Gateway task API. The client does not require SSH; a tunnel is one optional development connection to a private model endpoint.
 
 ## Project contract and execution

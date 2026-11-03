@@ -207,6 +207,12 @@ def main():
     runtime.resume_pending()
     lm_options = dict(api_base=os.environ["EVOLUTION_API_BASE"], api_key=os.environ["EVOLUTION_API_KEY"],
                       max_tokens=6000, temperature=0.3, cache=False)
+    if control_token := os.environ.get('EVOLUTION_CONTROL_AUTHORIZATION'):
+        lm_options['extra_headers'] = {'X-Hermes-Control-Authorization': 'Bearer ' + control_token}
+    if os.environ.get('EVOLUTION_MODEL_NO_RETRY') == '1':
+        lm_options.update(num_retries=0, max_retries=0)
+    if timeout := os.environ.get('EVOLUTION_MODEL_TIMEOUT'):
+        lm_options['timeout'] = float(timeout)
     ledger = UsageLedger(output / 'model-usage.jsonl')
     reflection_lm = AccountingLM(os.environ["EVOLUTION_MODEL"], ledger=ledger, role='reflection', **lm_options)
     judge_lm = AccountingLM(os.environ["EVOLUTION_JUDGE_MODEL"], ledger=ledger, role='evaluation', **lm_options)
