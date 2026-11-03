@@ -267,6 +267,14 @@ def main():
             if git(repo, 'rev-parse', 'HEAD') != expected_base:
                 raise RuntimeError('Production source changed during the experiment; publication stopped')
             try:
+                runtime.verify_production_compatibility()
+            except Exception:
+                write_json(output / 'selected-release.json', {'experiment_id': runtime.experiment_id,
+                           'status': 'publication_blocked', 'production_may_have_changed': False,
+                           'reason': 'production_compatibility_check_failed',
+                           'details': 'production-compatibility.json'})
+                raise
+            try:
                 revision, state = runtime.deploy(selected_body)
             except Exception:
                 production = getattr(runtime, 'production', runtime)

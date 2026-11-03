@@ -42,6 +42,8 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
             pass
         def has_search_capacity(self, next_iteration, holdout):
             return True
+        def verify_production_compatibility(self):
+            pass
         def execute(self, instructions, task_input):
             with execution_lock:
                 executions.append(json.loads(task_input)['id'])

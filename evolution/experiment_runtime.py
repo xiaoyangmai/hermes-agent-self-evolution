@@ -50,6 +50,12 @@ class ExperimentSlot(HermesRuntime):
                     raise RuntimeError('Non-optimized runtime context changed; start a new experiment')
                 write_json(fixed_path, fixed)
             self.key = self.request(self.prefix + '/profiles/' + self.project.PROFILE + '/gateway-key')['api_server_key']
+            version = self.request('/p/' + self.project.PROFILE + '/health/detailed', gateway=True)['version']
+            version_path = self.output / 'fixed-runtime-version.json'
+            with self.fixed_lock:
+                if version_path.exists() and json.loads(version_path.read_text())['version'] != version:
+                    raise RuntimeError('Hermes versions differ between experiment instances')
+                write_json(version_path, {'version': version})
             caps = self.request('/p/' + self.project.PROFILE + '/v1/capabilities', gateway=True)['features']
             if not all(caps.get(k) for k in ('run_submission', 'run_status', 'run_stop', 'session_resources')) or not caps['runs_idempotency']['durable']:
                 raise RuntimeError('Gateway lacks required execution/recovery capabilities')
@@ -187,3 +193,26 @@ class ParallelExperimentRuntime:
 
     def deploy(self, body):
         return self.production.deploy(body)
+
+    def verify_production_compatibility(self):
+        write_json(self.output / 'production-compatibility.json',
+                   {'compatible': False, 'reason': 'pre_adoption_check_incomplete'})
+        folder = self.output / 'production'
+        state = self.production.environment(folder, 'pre-adoption-' + uuid.uuid4().hex)
+        relative = self.project.SKILL.split('/', 2)[2]
+        expected = json.loads((self.output / 'fixed-runtime.json').read_text(encoding='utf-8'))
+        actual = {k: v for k, v in state['files'].items() if k != relative}
+        changed = sorted(k for k in expected.keys() | actual.keys() if expected.get(k) != actual.get(k))
+        self.production.key = self.production.request(self.production.prefix + '/profiles/' + self.project.PROFILE + '/gateway-key')['api_server_key']
+        version = self.production.request('/p/' + self.project.PROFILE + '/health/detailed', gateway=True)['version']
+        expected_version = json.loads((self.output / 'fixed-runtime-version.json').read_text())['version']
+        baseline = '---\n' + self.frontmatter.strip() + '\n---\n\n' + self.initial_body + '\n'
+        checks = {'fixed_files_match': not changed, 'runtime_version_match': version == expected_version,
+                  'source_revision_match': state['revision'] == self.baseline_revision,
+                  'baseline_skill_match': state['files'].get(relative) == digest(baseline.encode())}
+        write_json(self.output / 'production-compatibility.json', {'compatible': all(checks.values()),
+                   'checks': checks, 'changed_files': changed, 'experiment_version': expected_version,
+                   'production_version': version, 'experiment_revision': self.baseline_revision,
+                   'production_revision': state['revision']})
+        if not all(checks.values()):
+            raise RuntimeError('Production differs from the validated experiment; see production-compatibility.json')

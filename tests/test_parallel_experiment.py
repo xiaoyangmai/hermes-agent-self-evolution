@@ -146,3 +146,29 @@ def test_unknown_running_task_retains_capacity_until_terminal_recovery(tmp_path)
     runtime.resume_pending()
     assert sum(runtime.active.values()) == 0 and not runtime.uncertain
     assert calls.count('lost') == 2
+
+
+def test_production_mismatch_blocks_adoption_without_recording_credentials(tmp_path):
+    runtime = object.__new__(ParallelExperimentRuntime)
+    runtime.output, runtime.baseline_revision = tmp_path, 'baseline-revision'
+    runtime.project = SimpleNamespace(PROFILE='frontend', SKILL='profiles/frontend/skills/test/SKILL.md')
+    runtime.frontmatter, runtime.initial_body = 'name: test', 'Baseline'
+    skill_hash = digest(b'---\nname: test\n---\n\nBaseline\n')
+    state = {'revision': 'baseline-revision', 'files': {'skills/test/SKILL.md': skill_hash, 'config.yaml': 'production-hash'}}
+    class Production:
+        prefix = '/v1/projects/demo'
+        def environment(self, *args):
+            return state
+        def request(self, path, **kwargs):
+            return {'version': '0.21.4'} if kwargs.get('gateway') else {'api_server_key': 'sensitive-secret'}
+    runtime.production = Production()
+    write_json(tmp_path / 'fixed-runtime.json', {'config.yaml': 'experiment-hash'})
+    write_json(tmp_path / 'fixed-runtime-version.json', {'version': '0.21.4'})
+    with pytest.raises(RuntimeError, match='Production differs'):
+        runtime.verify_production_compatibility()
+    recorded = json.loads((tmp_path / 'production-compatibility.json').read_text())
+    assert not recorded['compatible'] and recorded['changed_files'] == ['config.yaml']
+    assert 'sensitive-secret' not in (tmp_path / 'production-compatibility.json').read_text()
+    state['files']['config.yaml'] = 'experiment-hash'
+    runtime.verify_production_compatibility()
+    assert json.loads((tmp_path / 'production-compatibility.json').read_text())['compatible']
