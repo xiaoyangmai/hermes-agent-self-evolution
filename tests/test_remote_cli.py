@@ -149,7 +149,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
             dspy_loop.main()
     else:
         dspy_loop.main()
-    assert json.loads((output / "selected-release.json").read_text())["status"] == ('pending' if improves else 'retained')
+    assert json.loads((output / "selected-release.json").read_text())["status"] == ('publication_failed' if improves else 'retained')
     repaired["contract"]["dataset_sha256"] = "different-cases"
     write_json(output / "experiment.json", repaired)
     with pytest.raises(RuntimeError, match="Experiment inputs changed"):

@@ -266,7 +266,14 @@ def main():
             expected_base = json.loads(manifest.read_text(encoding='utf-8'))['baseline_revision']
             if git(repo, 'rev-parse', 'HEAD') != expected_base:
                 raise RuntimeError('Production source changed during the experiment; publication stopped')
-            revision, state = runtime.deploy(selected_body)
+            try:
+                revision, state = runtime.deploy(selected_body)
+            except Exception:
+                production = getattr(runtime, 'production', runtime)
+                write_json(output / 'selected-release.json', {'experiment_id': runtime.experiment_id,
+                           'status': 'publication_failed', 'production_may_have_changed':
+                           getattr(production, 'production_mutation_started', True)})
+                raise
             release = {"status": "applied", "revision": revision, "state": state}
         else:
             release = {"status": "retained", "revision": git(repo, "rev-parse", "HEAD"),

@@ -104,15 +104,23 @@ class HermesRuntime:
     def deploy(self, body: str):
         if not body.strip() or len(body) > 15000:
             raise ValueError("Candidate Skill must contain 1..15000 characters")
+        self.production_mutation_started = False
+        for profile in self.project.PROFILES:
+            self.key = self.request(self.prefix + "/profiles/" + profile + "/gateway-key")["api_server_key"]
+            health = self.request("/p/" + profile + "/health/detailed", gateway=True)
+            if health["active_agents"]:
+                raise RuntimeError("Gateway refresh would interrupt an active run: " + profile)
         full = "---\n" + self.frontmatter.strip() + "\n---\n\n" + body.strip() + "\n"
         expected_hash = digest(full.encode())
         if self.skill_path.read_text(encoding="utf-8") != full:
             if git(self.repo, "status", "--porcelain", "--untracked-files=no"):
                 raise RuntimeError("Commit project changes before optimizing")
+            self.production_mutation_started = True
             self.skill_path.write_bytes(full.encode())
             git(self.repo, "add", "--", self.project.SKILL)
             git(self.repo, "commit", "-m", "Evaluate DSPy Skill " + expected_hash[:12])
         revision = git(self.repo, "rev-parse", "HEAD")
+        self.production_mutation_started = True
         git(self.repo, "push", "origin", "HEAD")
         folder = self.output / "releases" / revision
         sync = self.operation(self.prefix + "/sync", folder / "sync.json", "sync-" + revision)
@@ -171,17 +179,22 @@ class HermesRuntime:
             self.key = self.request(self.prefix + "/profiles/" + self.project.PROFILE + "/gateway-key")["api_server_key"]
         prefix = "/p/" + self.project.PROFILE + "/v1/runs"
         if "gateway_run_id" not in receipt:
-            # A resumed prepared trial may find another candidate installed.
-            revision, before = self.deploy(instructions)
-            receipt.update(revision=revision, before=before)
-            write_json(receipt_file, receipt)
-            if hasattr(self, 'project_home'):
-                task = self.project.task(case, receipt["delivery_id"], receipt["revision"], project_home=self.project_home)
+            if receipt['status'] == 'prepared':
+                revision, before = self.deploy(instructions)
+                receipt.update(revision=revision, before=before)
+                if hasattr(self, 'project_home'):
+                    task = self.project.task(case, receipt["delivery_id"], revision, project_home=self.project_home)
+                else:
+                    task = self.project.task(case, receipt["delivery_id"], revision)
+                write_json(folder / "task.json", task)
+                # Preserve the exact request before sending it. A lost response is
+                # retried with the same idempotency key, without another release.
+                receipt.update(status='submitting', deadline=time.time() + self.timeout)
+                write_json(receipt_file, receipt)
             else:
-                task = self.project.task(case, receipt["delivery_id"], receipt["revision"])
-            write_json(folder / "task.json", task)
+                task = json.loads((folder / 'task.json').read_text(encoding='utf-8'))
             submitted = self.request(prefix, task, gateway=True, key=receipt["delivery_id"])
-            receipt.update(gateway_run_id=submitted["run_id"], status="running", deadline=time.time() + self.timeout)
+            receipt.update(gateway_run_id=submitted["run_id"], status="running")
             write_json(receipt_file, receipt)
         path = prefix + "/" + receipt["gateway_run_id"]
         while True:
@@ -189,11 +202,15 @@ class HermesRuntime:
             write_json(folder / "status.json", status)
             if status["status"] in ("completed", "failed", "cancelled", "canceled"):
                 break
-            if time.time() > receipt["deadline"]:
+            if time.time() > receipt["deadline"] and not receipt.get('stop_requested'):
                 self.request(path + "/stop", {}, gateway=True)
-                raise TimeoutError("Run stop requested; resume to collect terminal state: " + str(folder))
+                receipt.update(stop_requested=True, stop_deadline=time.time() + 60)
+                write_json(receipt_file, receipt)
+            if receipt.get('stop_requested') and time.time() > receipt['stop_deadline']:
+                raise TimeoutError("Run stop requested but terminal state remains unconfirmed: " + str(folder))
             time.sleep(3)
         receipt["terminal"] = status
+        write_json(receipt_file, receipt)
         session = status.get("session_id", receipt["gateway_run_id"])
         rows, offset = [], 0
         while True:

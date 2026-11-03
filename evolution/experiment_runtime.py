@@ -73,6 +73,7 @@ class ParallelExperimentRuntime:
         self.active = {'a': 0, 'b': 0}
         self.bodies = {'a': None, 'b': None}
         self.inflight = set()
+        self.uncertain = {}
         self.baseline_revision = git(repo, 'rev-parse', 'HEAD')
 
     def __deepcopy__(self, memo):
@@ -112,9 +113,10 @@ class ParallelExperimentRuntime:
     def resume_pending(self):
         # Finish previously submitted runs before any slot can install another
         # candidate. Receipts retain the original run ID and deadline.
+        self.failure = None
         for path in (self.output / 'trials').glob('*/receipt.json'):
             receipt = json.loads(path.read_text(encoding='utf-8'))
-            if receipt['status'] != 'running':
+            if receipt['status'] not in ('submitting', 'running'):
                 continue
             identity = receipt['candidate_sha256']
             if identity == digest(self.initial_body.encode()):
@@ -126,6 +128,7 @@ class ParallelExperimentRuntime:
                     raise RuntimeError('Pending run candidate does not match its saved body hash')
             task_input = json.dumps(receipt['case'], ensure_ascii=False, sort_keys=True)
             self.execute(body, task_input)
+        self.failure = None
 
     def execute(self, instructions, task_input):
         identity = digest((self.experiment_id + '\0' + instructions + '\0' + task_input).encode())
@@ -133,6 +136,8 @@ class ParallelExperimentRuntime:
         with self.condition:
             while identity in self.inflight:
                 self.condition.wait()
+            if self.failure and identity not in self.uncertain:
+                raise RuntimeError('Experiment stopped after infrastructure failure') from self.failure
             if receipt_file.exists():
                 receipt = json.loads(receipt_file.read_text(encoding='utf-8'))
                 if receipt['status'] == 'collected':
@@ -145,13 +150,17 @@ class ParallelExperimentRuntime:
                            'case': json.loads(task_input), 'candidate_sha256': digest(instructions.encode())}
                 prior_slot = None
                 write_json(receipt_file, receipt)
-            self.inflight.add(identity)
+            already_reserved = identity in self.uncertain
             while True:
+                if self.failure and not already_reserved:
+                    raise RuntimeError('Experiment stopped after infrastructure failure') from self.failure
                 available = [s for s in self.slots if (not prior_slot or prior_slot == s)
                              and (not self.active[s] or self.bodies[s] == instructions)]
-                if sum(self.active.values()) < 4 and available:
+                if (already_reserved or sum(self.active.values()) < 4) and available:
                     slot = min(available, key=lambda s: (self.bodies[s] != instructions, self.active[s]))
-                    self.active[slot] += 1
+                    self.inflight.add(identity)
+                    if not already_reserved:
+                        self.active[slot] += 1
                     self.bodies[slot] = instructions
                     receipt['slot'] = slot
                     write_json(receipt_file, receipt)
@@ -161,9 +170,18 @@ class ParallelExperimentRuntime:
             runtime = self.slots[slot]
             runtime.experiment_id = self.experiment_id
             return runtime.execute(instructions, task_input)
+        except Exception as exc:
+            with self.condition:
+                self.failure = exc
+            raise
         finally:
             with self.condition:
-                self.active[slot] -= 1
+                latest = json.loads(receipt_file.read_text(encoding='utf-8'))
+                if latest['status'] in ('submitting', 'running') and not latest.get('terminal'):
+                    self.uncertain[identity] = slot
+                else:
+                    self.uncertain.pop(identity, None)
+                    self.active[slot] -= 1
                 self.inflight.remove(identity)
                 self.condition.notify_all()
 
