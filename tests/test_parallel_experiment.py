@@ -191,3 +191,37 @@ def test_production_revision_observation_is_read_only_and_failure_is_unknown(mon
         raise OSError('offline')
     monkeypatch.setattr(module.urllib.request, 'urlopen', unavailable)
     assert runtime.observe_production_revision() is None
+
+
+def test_search_reserve_credits_only_reusable_collected_baseline_training_cases(tmp_path):
+    from evolution.dspy_loop import cached_training_credit
+
+    runtime = object.__new__(ParallelExperimentRuntime)
+    runtime.output, runtime.experiment_id, runtime.initial_body, runtime.max_runs = tmp_path, 'exp', 'baseline', 14
+    state = SimpleNamespace(program_candidates=[{'produce': 'baseline'}])
+    cases = [{'id': 'train-a'}, {'id': 'train-b'}]
+
+    def save(case, body='baseline', experiment='exp', status='collected'):
+        task = json.dumps(case, ensure_ascii=False, sort_keys=True)
+        identity = digest((experiment + '\0' + body + '\0' + task).encode())
+        write_json(tmp_path / 'trials' / identity / 'receipt.json', {'status': status})
+
+    save({'id': 'validation'})
+    save(cases[0])
+    save(cases[1], status='running')
+    assert cached_training_credit(runtime, state, cases) == 1
+    # Receipts already occupy budget; the full held-out reserve stays intact.
+    runtime.max_runs = 14
+    assert not runtime.has_search_capacity(6, 6)
+    assert runtime.has_search_capacity(6 - 1, 6)
+    assert not runtime.has_search_capacity(6 - 1, 7)
+
+    save(cases[1], body='other')
+    save(cases[1], experiment='old-exp')
+    assert cached_training_credit(runtime, state, cases) == 1
+    save(cases[1])
+    assert cached_training_credit(runtime, state, cases) == 2
+    assert cached_training_credit(runtime, state, cases + [{'id': 'train-c'}]) == 1
+    assert cached_training_credit(runtime, state, cases + [{'id': 'train-c'}, {'id': 'train-d'}]) == 0
+    assert cached_training_credit(runtime, SimpleNamespace(program_candidates=[{'produce': 'changed'}]), cases) == 0
+    assert cached_training_credit(runtime, SimpleNamespace(program_candidates=[{'produce': 'baseline'}, {'produce': 'changed'}]), cases) == 0

@@ -100,6 +100,21 @@ frontmatter. Do not change the task input protocol or the Skill's declared scope
     return propose
 
 
+def cached_training_credit(runtime, state, train_cases):
+    """Count worst-case parent executions avoided by collected baseline trials."""
+    if len(state.program_candidates) != 1 or state.program_candidates[0].get('produce') != runtime.initial_body:
+        return 0
+    cached = 0
+    for case in train_cases:
+        task_input = json.dumps(case, ensure_ascii=False, sort_keys=True)
+        identity = digest((runtime.experiment_id + '\0' + runtime.initial_body + '\0' + task_input).encode())
+        receipt = runtime.output / 'trials' / identity / 'receipt.json'
+        if receipt.exists() and json.loads(receipt.read_text(encoding='utf-8'))['status'] == 'collected':
+            cached += 1
+    # Two sampled one-case minibatches can hit any of the uncached cases.
+    return min(2, len(train_cases)) - min(2, len(train_cases) - cached)
+
+
 def build_metric(project, judge_lm, runtime):
     locks = {}
     guard = threading.Lock()
@@ -134,7 +149,7 @@ def main():
     parser.add_argument("--max-metric-calls", type=int)
     parser.add_argument("--max-remote-runs", type=int, help="Reduce this experiment's project run limit")
     parser.add_argument("--reflection-context", type=Path, help="Reviewed prior evidence/research and a testable design hypothesis; frozen for this experiment")
-    parser.add_argument("--resume-engine-fix", help="Audited reason for a transport/export-only engine repair; task, grader, data, models and policy must be unchanged")
+    parser.add_argument("--resume-engine-fix", help="Audited reason for a transport/export or cached-run budget-accounting repair; task, grader, data, models and policy must be unchanged")
     args = parser.parse_args()
     repo, output = args.repo.resolve(), args.output.resolve()
     if (output / 'invalid-search.json').exists():
@@ -217,7 +232,7 @@ def main():
                           instruction_proposer=instruction_proposer(reflection_lm, runtime.frontmatter, reflection_context),
                           **optimizer_settings, num_threads=4, track_stats=True, log_dir=str(output / "gepa"),
                           gepa_kwargs={"stop_callbacks": lambda state: runtime.failure is not None or
-                                       not runtime.has_search_capacity(iteration_reserve, holdout_reserve),
+                                       not runtime.has_search_capacity(iteration_reserve - cached_training_credit(runtime, state, dataset['train']), holdout_reserve),
                                        "sampling_strategy": SameParentSampling(n=2)})
     selected_body = baseline_body
     write_json(output / "selected-release.json", {"status": "pending", "experiment_id": runtime.experiment_id})
