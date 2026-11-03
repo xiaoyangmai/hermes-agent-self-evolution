@@ -17,7 +17,7 @@ Do not remove environment/check/prepare or finalize/result/artifacts/download me
 
 ## What DSPy actually changes
 
-The selected native Skill body is the `dspy.Predict` signature instructions. The remote adapter writes those exact instructions into the repository Skill, preserving frontmatter; commits/pushes; publishes; and executes Hermes. GEPA's normal predictor trace therefore contains the actual remote output and feedback. The candidate tested remotely must match `program.json`. After rejection, the final installed Skill intentionally matches the baseline instead; `selected-release.json` records that final applied choice. Do not mistake a saved compiled candidate for an adopted release.
+The selected native Skill body is the `dspy.Predict` signature instructions. The remote adapter writes those exact instructions into the repository Skill, preserving frontmatter; commits/pushes; publishes to an experiment slot; and executes Hermes. GEPA's normal predictor trace therefore contains the actual remote output and feedback. The candidate tested remotely must match `program.json`. Rejection leaves production untouched; `selected-release.json` records publication status and any observed production revision. Do not mistake a saved compiled candidate for an adopted release or a production checkout observation for verified installed behavior.
 
 Do not optimize an unused prompt while exporting an unchanged `skill_text` member. Do not fabricate a DSPy trace, simulate Hermes with a direct LLM answer, or present a text-only Skill experiment as remote acceptance.
 
@@ -66,11 +66,11 @@ If only transport or result export code was repaired, the engine supports `--res
 
 Validation selection is not adoption. Evaluate the frozen winner and baseline on the reserved comparison; counterbalance order where practical. Require required artifacts and semantic gates, then check per-case dimensions and meaningful gain. A higher average must not hide a regression in an already-working capability. The demo's exact thresholds belong to its adapter, not this Skill.
 
-When validation retains the unchanged baseline, the engine records `search_retained_baseline`, leaves the held-out comparison empty, and restores/verifies that baseline. No new version exists to justify expensive comparison runs. Report this as no selected improvement, not as passing a held-out evaluation; preserve those unexecuted cases for a later experiment.
+When validation retains the unchanged baseline, the engine records `search_retained_baseline`, leaves the held-out comparison empty, and does not publish a new candidate. No new version exists to justify expensive comparison runs. Report this as no selected improvement, not as passing a held-out evaluation; preserve those unexecuted cases for a later experiment.
 
 Report completed run count, delivered artifacts, per-case paired scores, grader disagreement, hard failures, time/usage evidence and final applied revision. Separate search evaluations from unique executions and held-out replicas. Small same-family model comparisons support a local proxy decision, not external ground truth, stable population-level improvement or demonstrated learning by children.
 
-On rejection, restore the declared baseline through Git and the ordinary release path and verify installed state. If the service is unavailable or a run is still active, report restoration pending; a `finally` block alone does not prove recovery. If budgets end without improvement, retain that result. Another experiment needs a justified hypothesis and fresh held-out evidence when previous outcomes informed the edit.
+On rejection, verify and report production state; isolated experiments do not require a production restore when no production mutation occurred. If a publication failure may have changed production, reconcile the declared baseline through Git and the ordinary release path, then verify installed state. If the service is unavailable or a run is still active, report reconciliation pending; a `finally` block alone does not prove recovery. If budgets end without improvement, retain that result. Another experiment needs a justified hypothesis and fresh held-out evidence when previous outcomes informed the edit.
 
 Codex still performs the higher-level reflection in [profile development](profile-development.md): inspect mechanism, research methods/tools when appropriate, choose the correct owner, and test a prediction. It does not hand-edit the optimized Skill midway through a running GEPA experiment.
 

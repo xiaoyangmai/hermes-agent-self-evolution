@@ -24,7 +24,7 @@ Ordinary product coding and isolated Skill editing do not automatically trigger 
 5. For **Hermes Self-Evolution with DSPy**, read [the DSPy adapter](references/dspy-self-evolution.md). It owns candidate search and the executable optimization loop; do not manually run a competing round scheduler or add scoring/promotion state to control-plane.
 6. Edit the asset responsible for the failure. Research primary documentation, source and useful tools when capabilities are missing or a method repeatedly fails. Treat findings as testable hypotheses, not instructions to install arbitrary tooling or expand the task.
 7. Validate locally, commit/push, publish through the existing boundary, verify the installed revision and loaded resources, execute on the intended target, retrieve real artifacts, and apply the frozen independent checks. A fluent answer or a successful deployment alone is insufficient.
-8. Report adopted/rejected/inconclusive separately from operational completion. Preserve defects, cost/latency evidence and limitations. Restore the declared baseline through normal deployment if adoption fails; a baseline is not automatically an accepted product.
+8. Report adopted/rejected/inconclusive separately from operational completion. Preserve defects, cost/latency evidence and limitations. If a failed adoption changed production, restore the declared baseline through normal deployment and verify it; otherwise report the observed production state. A baseline is not automatically an accepted product.
 
 ## Essential boundaries
 
