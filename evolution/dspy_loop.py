@@ -21,6 +21,7 @@ from gepa.strategies.proposal_sampling import SameParentSampling
 
 from evolution.hermes_runtime import HermesRuntime, digest, git, write_json
 from evolution.experiment_runtime import ParallelExperimentRuntime
+from evolution.usage import AccountingLM, UsageLedger
 
 
 class Deliver(dspy.Signature):
@@ -156,7 +157,7 @@ def main():
     optimizer_settings = {"reflection_minibatch_size": 1,
                           "skip_perfect_score": True, "use_merge": False}
     frozen = {"dataset_sha256": digest(args.dataset.read_bytes()), "project_module_sha256": digest(Path(project.__file__).read_bytes()),
-              "engine_sha256": digest(Path(__file__).read_bytes() + Path(__file__).with_name("hermes_runtime.py").read_bytes() + Path(__file__).with_name("experiment_runtime.py").read_bytes()),
+              "engine_sha256": digest(Path(__file__).read_bytes() + Path(__file__).with_name("hermes_runtime.py").read_bytes() + Path(__file__).with_name("experiment_runtime.py").read_bytes() + Path(__file__).with_name("usage.py").read_bytes()),
               "policy": project.POLICY, "max_metric_calls": budget, "optimizer": "dspy-3.3.1/gepa-0.1.4",
               "optimizer_settings": optimizer_settings, "fixed_skill_identity": runtime.frontmatter,
               "reflection_model": os.environ["EVOLUTION_MODEL"], "judge_model": os.environ["EVOLUTION_JUDGE_MODEL"],
@@ -185,12 +186,14 @@ def main():
     runtime.resume_pending()
     lm_options = dict(api_base=os.environ["EVOLUTION_API_BASE"], api_key=os.environ["EVOLUTION_API_KEY"],
                       max_tokens=6000, temperature=0.3, cache=False)
-    reflection_lm = dspy.LM(os.environ["EVOLUTION_MODEL"], **lm_options)
-    judge_lm = dspy.LM(os.environ["EVOLUTION_JUDGE_MODEL"], **lm_options)
+    ledger = UsageLedger(output / 'model-usage.jsonl')
+    reflection_lm = AccountingLM(os.environ["EVOLUTION_MODEL"], ledger=ledger, role='reflection', **lm_options)
+    judge_lm = AccountingLM(os.environ["EVOLUTION_JUDGE_MODEL"], ledger=ledger, role='evaluation', **lm_options)
     dspy.configure(lm=reflection_lm, adapter=dspy.JSONAdapter())
     calibration_path = output / "calibration.json"
     if not calibration_path.exists():
-        write_json(calibration_path, project.calibrate(judge_lm))
+        calibration_lm = AccountingLM(os.environ["EVOLUTION_JUDGE_MODEL"], ledger=ledger, role='calibration', **lm_options)
+        write_json(calibration_path, project.calibrate(calibration_lm))
     if not json.loads(calibration_path.read_text(encoding="utf-8"))["passed"]:
         raise RuntimeError("Grader calibration failed; no production search was started")
     program = HermesSkillProgram(baseline_body, runtime)
