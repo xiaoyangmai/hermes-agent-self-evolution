@@ -131,6 +131,7 @@ def main():
     parser.add_argument("--dataset", type=Path, required=True, help="Private train/validation/test JSON, outside the deployed repository")
     parser.add_argument("--output", type=Path, required=True, help="Reuse to resume the same frozen experiment")
     parser.add_argument("--max-metric-calls", type=int)
+    parser.add_argument("--max-remote-runs", type=int, help="Reduce this experiment's project run limit")
     parser.add_argument("--reflection-context", type=Path, help="Reviewed prior evidence/research and a testable design hypothesis; frozen for this experiment")
     parser.add_argument("--resume-engine-fix", help="Audited reason for a transport/export-only engine repair; task, grader, data, models and policy must be unchanged")
     args = parser.parse_args()
@@ -143,6 +144,9 @@ def main():
         parser.error("Commit authored project changes before running")
     sys.path.insert(0, str(repo))
     project = importlib.import_module(args.project_module)
+    run_budget = args.max_remote_runs if args.max_remote_runs is not None else project.POLICY['max_remote_runs']
+    if not 1 <= run_budget <= project.POLICY['max_remote_runs']:
+        parser.error('--max-remote-runs must be positive and no greater than the project limit')
     dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
     if any(not dataset.get(split) for split in ("train", "validation", "test")):
         parser.error("Nonempty train, validation and test splits are required")
@@ -154,11 +158,12 @@ def main():
     budget = args.max_metric_calls or project.POLICY["max_metric_calls"]
     reflection_context = args.reflection_context.read_text(encoding='utf-8') if args.reflection_context else ''
     runtime = ParallelExperimentRuntime(repo, project, output)
+    runtime.set_run_budget(run_budget)
     optimizer_settings = {"reflection_minibatch_size": 1,
                           "skip_perfect_score": True, "use_merge": False}
     frozen = {"dataset_sha256": digest(args.dataset.read_bytes()), "project_module_sha256": digest(Path(project.__file__).read_bytes()),
               "engine_sha256": digest(Path(__file__).read_bytes() + Path(__file__).with_name("hermes_runtime.py").read_bytes() + Path(__file__).with_name("experiment_runtime.py").read_bytes() + Path(__file__).with_name("usage.py").read_bytes()),
-              "policy": project.POLICY, "max_metric_calls": budget, "optimizer": "dspy-3.3.1/gepa-0.1.4",
+              "policy": project.POLICY, "max_metric_calls": budget, "max_remote_runs": run_budget, "optimizer": "dspy-3.3.1/gepa-0.1.4",
               "optimizer_settings": optimizer_settings, "fixed_skill_identity": runtime.frontmatter,
               "reflection_model": os.environ["EVOLUTION_MODEL"], "judge_model": os.environ["EVOLUTION_JUDGE_MODEL"],
               "reflection_context_sha256": digest(reflection_context.encode())}
@@ -268,12 +273,22 @@ def main():
         if selected_body != baseline_body:
             expected_base = json.loads(manifest.read_text(encoding='utf-8'))['baseline_revision']
             if git(repo, 'rev-parse', 'HEAD') != expected_base:
+                write_json(output / 'selected-release.json', {'experiment_id': runtime.experiment_id,
+                           'status': 'publication_blocked', 'baseline_revision': expected_base,
+                           'production_revision': None, 'verification_status': 'unavailable',
+                           'production_may_have_changed': False, 'reason': 'baseline_source_changed'})
                 raise RuntimeError('Production source changed during the experiment; publication stopped')
             try:
                 runtime.verify_production_compatibility()
             except Exception:
+                detail_path = output / 'production-compatibility.json'
+                detail = json.loads(detail_path.read_text()) if detail_path.exists() else {}
+                observed = detail.get('production_revision')
                 write_json(output / 'selected-release.json', {'experiment_id': runtime.experiment_id,
-                           'status': 'publication_blocked', 'production_may_have_changed': False,
+                           'status': 'publication_blocked', 'baseline_revision': expected_base,
+                           'production_revision': observed,
+                           'verification_status': 'checkout_observed' if observed else 'unavailable',
+                           'production_may_have_changed': False,
                            'reason': 'production_compatibility_check_failed',
                            'details': 'production-compatibility.json'})
                 raise
@@ -282,13 +297,16 @@ def main():
             except Exception:
                 production = getattr(runtime, 'production', runtime)
                 write_json(output / 'selected-release.json', {'experiment_id': runtime.experiment_id,
-                           'status': 'publication_failed', 'production_may_have_changed':
+                           'status': 'publication_failed', 'baseline_revision': expected_base,
+                           'production_revision': None, 'verification_status': 'unavailable', 'production_may_have_changed':
                            getattr(production, 'production_mutation_started', True)})
                 raise
-            release = {"status": "applied", "revision": revision, "state": state}
+            release = {"status": "applied", "baseline_revision": expected_base,
+                       "production_revision": revision, "verification_status": "verified_installed", "state": state}
         else:
-            release = {"status": "retained", "revision": git(repo, "rev-parse", "HEAD"),
-                       "verified": False}
+            observed = runtime.observe_production_revision()
+            release = {"status": "not_published", "baseline_revision": json.loads(manifest.read_text(encoding='utf-8'))['baseline_revision'],
+                       "production_revision": observed, "verification_status": "checkout_observed" if observed else "unavailable"}
         write_json(output / "selected-release.json", {"experiment_id": runtime.experiment_id, **release})
     print(json.dumps({"output": str(output), "decision": decision}, ensure_ascii=False))
 

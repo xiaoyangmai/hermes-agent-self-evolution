@@ -2,6 +2,9 @@
 import json
 import subprocess
 import threading
+import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -88,6 +91,34 @@ class ParallelExperimentRuntime:
     def has_search_capacity(self, next_iteration, holdout):
         used = len(list((self.output / 'trials').glob('*/receipt.json')))
         return used + next_iteration + holdout <= self.max_runs
+
+    def set_run_budget(self, limit):
+        self.max_runs = limit
+        for slot in self.slots.values():
+            slot.max_runs = limit
+
+    def observe_production_revision(self):
+        # The control API exposes checkout revision via its read-only environment
+        # check operation. Keep this best-effort observation bounded on failure.
+        production = self.production
+        request = urllib.request.Request(production.base + production.prefix + '/environment/check',
+            data=b'{}', headers={'Authorization': 'Bearer ' + production.token,
+                                 'Content-Type': 'application/json', 'Idempotency-Key': 'observe-' + uuid.uuid4().hex})
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                record = json.load(response)
+            deadline = time.monotonic() + 6
+            while record['status'] not in ('succeeded', 'failed', 'cancelled') and time.monotonic() < deadline:
+                time.sleep(0.5)
+                request = urllib.request.Request(production.base + '/v1/operations/' + record['id'],
+                                                 headers={'Authorization': 'Bearer ' + production.token})
+                with urllib.request.urlopen(request, timeout=3) as response:
+                    record = json.load(response)
+            if record['status'] == 'succeeded':
+                return self.project.environment_report(record['result'])['revision']
+        except (urllib.error.URLError, TimeoutError, OSError, KeyError, ValueError):
+            pass
+        return None
 
     def candidate_revision(self, body):
         if body.strip() == self.initial_body:

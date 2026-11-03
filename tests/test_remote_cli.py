@@ -21,7 +21,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     module_path.write_text("# frozen test project")
     project = ModuleType("_remote_cli_test_project")
     project.__file__ = str(module_path)
-    project.POLICY = {"max_metric_calls": 6}
+    project.POLICY = {"max_metric_calls": 6, "max_remote_runs": 16}
     project.calibrate = lambda lm: {"passed": True}
     project.grade = lambda folder, case, lm: json.loads((folder / "observation.json").read_text())
     project.decide = lambda comparison: {"adopt": comparison["candidate"][0]["score"] > comparison["baseline"][0]["score"]}
@@ -40,6 +40,10 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
             return self
         def resume_pending(self):
             pass
+        def set_run_budget(self, limit):
+            self.max_runs = limit
+        def observe_production_revision(self):
+            return 'observed-production-sha'
         def has_search_capacity(self, next_iteration, holdout):
             return True
         def verify_production_compatibility(self):
@@ -78,7 +82,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     context = tmp_path / 'reflection.md'
     context.write_text('Observed missing evidence; test a verify-before-edit procedure.')
     argv = ["hermes-evolve", "--repo", str(repo), "--dataset", str(dataset), "--output", str(output),
-            "--project-module", project.__name__, '--reflection-context', str(context)]
+            "--project-module", project.__name__, '--reflection-context', str(context), '--max-remote-runs', '15']
     monkeypatch.setattr(sys, "argv", argv)
     if interrupted_case:
         original_grade = project.grade
@@ -128,9 +132,16 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
     assert "not the literal message" in prompts[0]
     assert context.read_text() in prompts[0]
     assert (output / 'reflection-context.md').read_text() == context.read_text()
-    assert json.loads((output / "selected-release.json").read_text())["revision"] == ('selected-sha' if improves else 'baseline-sha')
+    selected = json.loads((output / "selected-release.json").read_text())
+    assert selected['baseline_revision'] == 'baseline-sha'
+    assert selected['production_revision'] == ('selected-sha' if improves else 'observed-production-sha')
+    assert selected['verification_status'] == ('verified_installed' if improves else 'checkout_observed')
 
     manifest = json.loads((output / "experiment.json").read_text())
+    assert manifest['contract']['max_remote_runs'] == 15
+    monkeypatch.setattr(sys, 'argv', argv + ['--max-remote-runs', '16'])
+    with pytest.raises(RuntimeError, match='Experiment inputs changed'):
+        dspy_loop.main()
     manifest["contract"]["engine_sha256"] = "previous-export-only-version"
     write_json(output / "experiment.json", manifest)
     monkeypatch.setattr(sys, "argv", argv + ["--resume-engine-fix", "Export-only repair; no experimental inputs changed."])
@@ -151,7 +162,7 @@ def test_compile_export_holdout_and_final_release(tmp_path, monkeypatch, improve
             dspy_loop.main()
     else:
         dspy_loop.main()
-    assert json.loads((output / "selected-release.json").read_text())["status"] == ('publication_failed' if improves else 'retained')
+    assert json.loads((output / "selected-release.json").read_text())["status"] == ('publication_failed' if improves else 'not_published')
     repaired["contract"]["dataset_sha256"] = "different-cases"
     write_json(output / "experiment.json", repaired)
     with pytest.raises(RuntimeError, match="Experiment inputs changed"):
@@ -164,7 +175,7 @@ def test_failed_calibration_stops_search_and_production_release(tmp_path, monkey
     project = ModuleType('_bad_calibration_project')
     project.__file__ = str(repo / 'project.py')
     (repo / 'project.py').write_text('# project')
-    project.POLICY = {'max_metric_calls': 6}
+    project.POLICY = {'max_metric_calls': 6, 'max_remote_runs': 16}
     project.calibrate = lambda lm: {'passed': False}
     monkeypatch.setitem(sys.modules, project.__name__, project)
     class Runtime:
@@ -174,6 +185,8 @@ def test_failed_calibration_stops_search_and_production_release(tmp_path, monkey
         def __init__(self, *args):
             pass
         def resume_pending(self):
+            pass
+        def set_run_budget(self, limit):
             pass
         def deploy(self, body):
             raise AssertionError('Production release must not run')
@@ -190,3 +203,8 @@ def test_failed_calibration_stops_search_and_production_release(tmp_path, monkey
         dspy_loop.main()
     assert not (output / 'gepa').exists()
     assert not (output / 'selected-release.json').exists()
+    for invalid in ('0', '17'):
+        monkeypatch.setattr(sys, 'argv', ['hermes-evolve', '--repo', str(repo), '--dataset', str(dataset),
+            '--output', str(output), '--project-module', project.__name__, '--max-remote-runs', invalid])
+        with pytest.raises(SystemExit):
+            dspy_loop.main()

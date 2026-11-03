@@ -1,4 +1,5 @@
 import json
+import io
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -172,3 +173,21 @@ def test_production_mismatch_blocks_adoption_without_recording_credentials(tmp_p
     state['files']['config.yaml'] = 'experiment-hash'
     runtime.verify_production_compatibility()
     assert json.loads((tmp_path / 'production-compatibility.json').read_text())['compatible']
+
+
+def test_production_revision_observation_is_read_only_and_failure_is_unknown(monkeypatch):
+    import evolution.experiment_runtime as module
+    runtime = object.__new__(ParallelExperimentRuntime)
+    runtime.production = SimpleNamespace(base='https://example.invalid', prefix='/v1/projects/demo', token='secret')
+    runtime.project = SimpleNamespace(environment_report=lambda result: result['check']['details'])
+    calls = []
+    def open_request(request, timeout):
+        calls.append((request.full_url, request.get_method()))
+        return io.BytesIO(json.dumps({'status': 'succeeded', 'result': {'check': {'details': {'revision': 'remote-sha'}}}}).encode())
+    monkeypatch.setattr(module.urllib.request, 'urlopen', open_request)
+    assert runtime.observe_production_revision() == 'remote-sha'
+    assert calls == [('https://example.invalid/v1/projects/demo/environment/check', 'POST')]
+    def unavailable(*args, **kwargs):
+        raise OSError('offline')
+    monkeypatch.setattr(module.urllib.request, 'urlopen', unavailable)
+    assert runtime.observe_production_revision() is None
