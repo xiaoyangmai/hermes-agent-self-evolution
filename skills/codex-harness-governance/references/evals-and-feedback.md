@@ -15,6 +15,8 @@ For each task, define:
 - graders that check both behavior and environment outcome;
 - known limitations and whether the result generalizes to the real runtime.
 
+Label truncated excerpts and retain the raw evidence: an omitted suffix in a trace summary is not evidence that the actual tool call omitted it.
+
 ## Evidence ladder
 
 Use the lowest level that answers the question, then test at the real level before relying on the result:
